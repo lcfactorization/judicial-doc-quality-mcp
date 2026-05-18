@@ -173,17 +173,27 @@ def get_innovation_config_resource() -> str:
 def list_dimensions() -> str:
     """列出所有可用的评分维度及其元数据（名称、标题、权重、满分）。
 
-    返回 JSON 字符串，包含所有维度的元数据列表。
-    Agent 可据此决定评估哪些维度。
+    返回 JSON 字符串，包含所有维度的元数据列表、等级划分信息、
+    以及 judicial-doc-anomaly-mcp 的自动检测状态。
+    Agent 可据此决定评估哪些维度，并了解异常检测联动是否可用。
     """
     try:
         dims = _loader.list_dimensions()
         if not dims:
             return _make_error(ErrorCode.DIMENSION_NOT_FOUND, "未找到任何维度 Skill 文件")
+        grades_info = {k: {"range": [v[0], v[1]], "description": v[2]} for k, v in QUALITY_GRADES.items()}
+        anomaly_status = {
+            "available": ANOMALY_MCP_CONFIG["available"],
+            "auto_detected": ANOMALY_MCP_CONFIG.get("auto_detected", False),
+            "server_name": ANOMALY_MCP_CONFIG["server_name"],
+            "supported_dimensions": ANOMALY_MCP_CONFIG["supported_dimensions"],
+        }
         return json.dumps({
             "success": True,
             "total": len(dims),
             "dimensions": dims,
+            "grades": grades_info,
+            "anomaly_mcp": anomaly_status,
         }, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("list_dimensions: %s", e, exc_info=True)
@@ -957,10 +967,16 @@ def generate_report(
     innovation_bonus: float = 0,
     anomaly_details: list[dict] | None = None,
     innovation_details: list[dict] | None = None,
+    anomaly_mcp_results: list[dict] | None = None,
+    timeline_result: dict | None = None,
+    evasive_result: dict | None = None,
+    evidence_result: dict | None = None,
+    document_meta: dict | None = None,
 ) -> str:
     """生成结构化 Markdown 评分报告。纯规则函数，零 Token 消耗。
 
     Agent 收集所有评分结果后，调用此工具生成最终报告。
+    支持 GitHub Alerts 风格（NOTE/TIP/IMPORTANT/WARNING/CAUTION）的 quote block。
 
     dimension_results: 各维度评分结果列表（来自 parse_score_result 的 parsed 字段）
     weighted_total: 加权总分（来自 calculate_weighted_score）
@@ -970,20 +986,46 @@ def generate_report(
     innovation_bonus: 创新性加分总额（来自 calculate_weighted_score）
     anomaly_details: 异常扣分明细（来自 calculate_weighted_score）
     innovation_details: 创新性加分明细（来自 calculate_weighted_score）
+    anomaly_mcp_results: 异常检测MCP联动结果（来自 query_anomaly_mcp，可选）
+    timeline_result: 时间线检测结果（来自 extract_timeline，可选）
+    evasive_result: 规避模式检测结果（来自 detect_evasive_patterns，可选）
+    evidence_result: 证据追踪结果（来自 trace_evidence_references，可选）
+    document_meta: 文书元信息（案号、法院、案件类型等，可选）
 
     返回 JSON 字符串，包含 report_markdown 字段。
     """
     try:
         lines = []
+
+        # ── 标题与元信息 ──
         lines.append("# 裁判文书质量评估报告\n")
 
+        if document_meta:
+            lines.append("| 项目 | 内容 |")
+            lines.append("|:---|:---|")
+            for k, v in document_meta.items():
+                lines.append(f"| {k} | {v} |")
+            lines.append("")
+
+        # ── 综合评级 ──
         grade_desc = QUALITY_GRADES.get(grade, (0, 0, "未知"))[2]
-        lines.append(f"**综合评级**：{grade}（{grade_desc}）  |  **加权总分**：{weighted_total}/100\n")
+        grade_lo, grade_hi = QUALITY_GRADES.get(grade, (0, 100))
+
+        lines.append("## 综合评级\n")
+        lines.append(f"**{grade}（{grade_desc}）**  |  加权总分 **{weighted_total}** / 100  |  等级区间 [{grade_lo}, {grade_hi}]\n")
 
         if anomaly_deduction > 0 or innovation_bonus > 0:
-            lines.append(f"> 基础分：{weighted_total - innovation_bonus + anomaly_deduction:.1f}  |  "
-                         f"异常扣分：-{anomaly_deduction:.0f}  |  创新加分：+{innovation_bonus:.0f}\n")
+            base = weighted_total - innovation_bonus + anomaly_deduction
+            lines.append("> [!NOTE]")
+            lines.append(f"> 基础分 {base:.1f}  |  异常扣分 −{anomaly_deduction:.0f}  |  创新加分 +{innovation_bonus:.0f}")
+            lines.append("")
 
+        # ── 等级说明 ──
+        lines.append("> [!TIP]")
+        lines.append("> **等级划分**：A 优秀 [95,100] · A⁻ 优良 [90,94] · B⁺ 良好 [85,89] · B 中上 [80,84] · C⁺ 中等 [75,79] · C 中下 [70,74] · D 及格 [60,69] · F 不及格 [0,59]")
+        lines.append("")
+
+        # ── 各维度评分 ──
         lines.append("## 各维度评分\n")
         lines.append("| 维度 | 得分 | 权重 | 加权得分 | 核心扣分项 | 核心加分项 |")
         lines.append("|:---|:---:|:---:|:---:|:---|:---|")
@@ -1009,22 +1051,210 @@ def generate_report(
 
         lines.append("")
 
+        # ── 异常扣分明细 ──
         if anomaly_details:
             lines.append("## 异常扣分明细\n")
+            lines.append("> [!CAUTION]")
+            lines.append(f"> 检出 {len(anomaly_details)} 项异常，合计扣分 −{anomaly_deduction:.0f}\n")
             lines.append("| 异常类型 | 严重程度 | 扣分 | 描述 |")
             lines.append("|:---|:---:|:---:|:---|")
             for ad in anomaly_details:
                 lines.append(f"| {ad.get('label', '')} | {ad.get('severity', '')} | -{ad.get('deduction', 0)} | {ad.get('description', '')[:40]} |")
             lines.append("")
 
+        # ── 创新性加分明细 ──
         if innovation_details:
             lines.append("## 创新性加分明细\n")
+            lines.append("> [!TIP]")
+            lines.append(f"> 检出 {len(innovation_details)} 项创新亮点，合计加分 +{innovation_bonus:.0f}\n")
             lines.append("| 加分类型 | 加分 | 描述 |")
             lines.append("|:---|:---:|:---|")
             for id_item in innovation_details:
                 lines.append(f"| {id_item.get('label', '')} | +{id_item.get('bonus', 0)} | {id_item.get('description', '')[:40]} |")
             lines.append("")
 
+        # ── 辅助检测结果 ──
+        has_aux = timeline_result or evasive_result or evidence_result
+        if has_aux:
+            lines.append("## 辅助检测结果\n")
+
+            if timeline_result:
+                total_events = timeline_result.get("total_events", 0)
+                anomaly_count = timeline_result.get("anomaly_count", 0)
+                completeness = timeline_result.get("completeness", "N/A")
+                anomalies = timeline_result.get("anomalies", [])
+
+                lines.append("### 时间线提取与异常检测\n")
+                lines.append(f"| 指标 | 结果 |")
+                lines.append(f"|:---|:---|")
+                lines.append(f"| 提取事件数 | {total_events} |")
+                lines.append(f"| 时间线异常数 | {anomaly_count} |")
+                lines.append(f"| 时间线完整性 | {completeness} |")
+                lines.append("")
+
+                if anomalies:
+                    high_anomalies = [a for a in anomalies if a.get("severity") == "high"]
+                    if high_anomalies:
+                        lines.append("> [!WARNING]")
+                        lines.append(f"> 检出 {len(high_anomalies)} 项高严重度时间线异常（时间倒置），请核实是否为叙事结构导致的伪异常\n")
+                    else:
+                        lines.append("> [!NOTE]")
+                        lines.append("> 时间线异常均为低严重度，不影响文书质量评价\n")
+
+                    lines.append("| 严重程度 | 异常类型 | 说明 |")
+                    lines.append("|:---:|:---|:---|")
+                    for a in anomalies[:10]:
+                        lines.append(f"| {a.get('severity', '?')} | {a.get('type', '?')} | {a.get('message', '')[:60]} |")
+                    if len(anomalies) > 10:
+                        lines.append(f"| | | ... 另有 {len(anomalies) - 10} 项省略 |")
+                    lines.append("")
+
+            if evasive_result:
+                risk_level = evasive_result.get("risk_level", "N/A")
+                detected_count = evasive_result.get("detected_count", 0)
+                patterns = evasive_result.get("patterns", [])
+                recommendation = evasive_result.get("recommendation", "")
+
+                lines.append("### 规避模式检测\n")
+                lines.append(f"| 指标 | 结果 |")
+                lines.append(f"|:---|:---|")
+                lines.append(f"| 风险等级 | {risk_level} |")
+                lines.append(f"| 检出模式数 | {detected_count} |")
+                lines.append("")
+
+                if risk_level in ("high", "medium"):
+                    lines.append("> [!CAUTION]")
+                    lines.append(f"> 规避模式风险等级为 **{risk_level}**，建议重点关注\n")
+                elif risk_level == "low":
+                    lines.append("> [!NOTE]")
+                    lines.append("> 规避模式风险等级为低，文书规避倾向不明显\n")
+
+                if patterns:
+                    lines.append("| 严重程度 | 模式名称 | 匹配数 | 说明 |")
+                    lines.append("|:---:|:---|:---:|:---|")
+                    for p in patterns:
+                        lines.append(f"| {p.get('severity', '?')} | {p.get('name', '?')} | {p.get('match_count', 0)} | {p.get('description', '')[:50]} |")
+                    lines.append("")
+
+                if recommendation:
+                    lines.append(f"> [!IMPORTANT]")
+                    lines.append(f"> {recommendation}\n")
+
+            if evidence_result:
+                total_ev = evidence_result.get("total_evidence", 0)
+                unaddressed = evidence_result.get("unaddressed_count", 0)
+                missing_reasoning = evidence_result.get("missing_reasoning_count", 0)
+                completeness = evidence_result.get("completeness", "N/A")
+
+                lines.append("### 证据引用追踪\n")
+                lines.append(f"| 指标 | 结果 |")
+                lines.append(f"|:---|:---|")
+                lines.append(f"| 证据项数 | {total_ev} |")
+                lines.append(f"| 未回应证据 | {unaddressed} |")
+                lines.append(f"| 缺说理证据 | {missing_reasoning} |")
+                lines.append(f"| 引用完整性 | {completeness} |")
+                lines.append("")
+
+                if unaddressed > 0 or missing_reasoning > 0:
+                    lines.append("> [!WARNING]")
+                    lines.append(f"> 存在 {unaddressed} 项未回应证据、{missing_reasoning} 项缺说理证据，可能影响证据采信的正当性\n")
+                else:
+                    lines.append("> [!TIP]")
+                    lines.append("> 证据引用完整，所有证据均有回应和说理\n")
+
+        # ── 异常检测MCP联动 ──
+        if anomaly_mcp_results:
+            lines.append("## 异常检测MCP联动结果\n")
+            lines.append("> [!IMPORTANT]")
+            lines.append("> 以下异常检测结果来自 [judicial-doc-anomaly-mcp](https://github.com/lcfactorization/judicial-doc-anomaly-mcp) 的16维检测体系，")
+            lines.append("> 覆盖程序异常、证据异常、事实认定异常、修辞技巧异常、逻辑异常、时间一致性、语义漂移等维度。")
+            lines.append("> 检测结果已自动纳入本报告的异常扣分计算。\n")
+
+            risk_summary = {}
+            total_anomalies = 0
+            for dim_result in anomaly_mcp_results:
+                dim_anomalies = dim_result.get("anomalies", [])
+                dim_count = dim_result.get("anomaly_count", len(dim_anomalies))
+                total_anomalies += dim_count
+                dim_risk = dim_result.get("risk_level", "unknown")
+                risk_summary[dim_risk] = risk_summary.get(dim_risk, 0) + 1
+
+            lines.append("### 检测概览\n")
+            lines.append(f"| 指标 | 结果 |")
+            lines.append(f"|:---|:---|")
+            lines.append(f"| 扫描维度数 | {len(anomaly_mcp_results)} |")
+            lines.append(f"| 检出异常总数 | {total_anomalies} |")
+            risk_order = ["critical", "high", "medium", "low", "unknown"]
+            risk_labels = {"critical": "严重", "high": "高", "medium": "中", "low": "低", "unknown": "未知"}
+            for rk in risk_order:
+                if rk in risk_summary:
+                    lines.append(f"| {risk_labels.get(rk, rk)}风险维度 | {risk_summary[rk]} |")
+            lines.append("")
+
+            critical_dims = [d for d in anomaly_mcp_results if d.get("risk_level") == "critical"]
+            high_dims = [d for d in anomaly_mcp_results if d.get("risk_level") == "high"]
+            medium_dims = [d for d in anomaly_mcp_results if d.get("risk_level") == "medium"]
+            low_dims = [d for d in anomaly_mcp_results if d.get("risk_level") in ("low", "unknown")]
+
+            if critical_dims:
+                lines.append("> [!CAUTION]")
+                dim_names = ", ".join(d.get("dimension", "?") for d in critical_dims)
+                lines.append(f"> **严重风险**：{len(critical_dims)} 个维度存在严重异常（{dim_names}），强烈建议重点审查\n")
+
+            if high_dims:
+                lines.append("> [!WARNING]")
+                dim_names = ", ".join(d.get("dimension", "?") for d in high_dims)
+                lines.append(f"> **高风险**：{len(high_dims)} 个维度存在高严重度异常（{dim_names}），建议重点关注\n")
+
+            if medium_dims:
+                lines.append("> [!NOTE]")
+                dim_names = ", ".join(d.get("dimension", "?") for d in medium_dims)
+                lines.append(f"> **中风险**：{len(medium_dims)} 个维度存在中等异常（{dim_names}），建议留意\n")
+
+            lines.append("### 各维度异常详情\n")
+            for dim_result in anomaly_mcp_results:
+                dim_name = dim_result.get("dimension", "?")
+                dim_risk = dim_result.get("risk_level", "unknown")
+                dim_count = dim_result.get("anomaly_count", 0)
+                dim_summary = dim_result.get("summary", "")
+                dim_anomalies = dim_result.get("anomalies", [])
+
+                risk_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢", "unknown": "⚪"}.get(dim_risk, "⚪")
+                lines.append(f"#### {risk_icon} {dim_name}（{risk_labels.get(dim_risk, dim_risk)}风险，{dim_count} 项异常）\n")
+
+                if dim_summary:
+                    lines.append(f"> {dim_summary}\n")
+
+                if dim_anomalies:
+                    lines.append("| 异常项 | 受益方 | 置信度 | 简述 |")
+                    lines.append("|:---|:---:|:---:|:---|")
+                    for a in dim_anomalies[:8]:
+                        name = a.get("item_name", a.get("f_code", "?"))
+                        beneficiary = a.get("beneficiary", "?")
+                        confidence = a.get("confidence", "?")
+                        desc = a.get("description", "")[:50]
+                        lines.append(f"| {name} | {beneficiary} | {confidence} | {desc} |")
+                    if len(dim_anomalies) > 8:
+                        lines.append(f"| | | | ... 另有 {len(dim_anomalies) - 8} 项省略 |")
+                    lines.append("")
+
+            lines.append("> [!TIP]")
+            lines.append("> 异常检测与质量评估互补：质量评估侧重文书规范性，异常检测侧重潜在不公与程序瑕疵。")
+            lines.append("> 两项结果合并参考，可更全面地评价文书质量。\n")
+        else:
+            lines.append("## 异常检测MCP联动\n")
+            auto_detected = ANOMALY_MCP_CONFIG.get("auto_detected", False)
+            if auto_detected:
+                lines.append("> [!NOTE]")
+                lines.append("> judicial-doc-anomaly-mcp 已安装但本次评估未调用异常检测。")
+                lines.append("> 可通过 `query_anomaly_mcp` 工具获取16维异常检测结果，自动纳入异常扣分计算。\n")
+            else:
+                lines.append("> [!NOTE]")
+                lines.append("> judicial-doc-anomaly-mcp 未安装，16维异常检测结果为空白。")
+                lines.append("> 安装方式：`pip install judicial-lint-mcp`")
+                lines.append("> 安装后系统将自动检测并启用联动，无需手动配置。\n")
+
+        # ── 一致性审查 ──
         if cross_check and cross_check.get("conflict_detected"):
             lines.append("## 一致性审查\n")
             lines.append("> [!WARNING]")
@@ -1032,15 +1262,19 @@ def generate_report(
             for c in cross_check.get("conflicts", []):
                 lines.append(f"- **{c.get('rule_name', '')}**：{c.get('message', '')}")
             lines.append("")
+        elif cross_check:
+            lines.append("## 一致性审查\n")
+            lines.append("> [!TIP]")
+            lines.append("> 各维度评分逻辑一致，未检出矛盾\n")
 
-        lines.append("---")
+        # ── 免责声明 ──
+        lines.append("---\n")
+        lines.append("> [!IMPORTANT]")
+        lines.append("> **免责声明**：本报告由 judicial-doc-quality-mcp 辅助生成，基于七维评分体系和规则引擎的自动化分析。")
+        lines.append("> 评估结果仅供参考，不构成法律意见。裁判文书的质量评价涉及复杂的法律判断，")
+        lines.append("> 本报告不能替代专业法律人士的审查。\n")
+
         lines.append(f"*报告由 judicial-doc-quality-mcp v0.1.0 生成*")
-        lines.append("")
-        lines.append("## 关联工具\n")
-        lines.append("本报告的质量评估可与 [judicial-doc-anomaly-mcp](https://github.com/lcfactorization/judicial-doc-anomaly-mcp) 的异常检测结果联动，")
-        lines.append("实现「质量评分 + 异常扣分」的综合评估体系。")
-        lines.append("anomaly-mcp 提供16维司法文书异常检测能力（程序异常、证据异常、事实认定异常、修辞技巧异常、逻辑异常等），")
-        lines.append("其检测结果可通过 `query_anomaly_mcp` 工具获取，并自动纳入本报告的异常扣分计算。")
 
         return json.dumps({
             "success": True,
@@ -1056,11 +1290,15 @@ def query_anomaly_mcp(
     document_text: str,
     dimensions: list[str] | None = None,
 ) -> str:
-    """尝试通过 MCP 调用 judicial-doc-anomaly-mcp 进行异常检测。
+    """自动检测并调用 judicial-doc-anomaly-mcp 进行异常检测。
 
-    当 judicial-doc-anomaly-mcp 可用时，Agent 应调用此工具获取异常检测结果，
-    再将结果传入 apply_anomaly_deduction 计算扣分。
-    当 anomaly-mcp 不可用时，返回空白结果，Agent 可继续使用质量评估流程。
+    启动时自动检测 anomaly-mcp 是否已安装且可导入：
+    - 已安装：自动调用 render_skill 生成各维度检测 Prompt，返回给 Agent
+    - 未安装：返回空白结果，Agent 可继续使用质量评估流程
+
+    本工具返回检测 Prompt 列表，Agent 需将每个 Prompt 发送给自己的 LLM，
+    再将 LLM 响应通过 submit_anomaly_response 提交解析。
+    完成全部维度后调用 finalize_anomaly_detection 获取汇总结果。
 
     推荐搭配使用：https://github.com/lcfactorization/judicial-doc-anomaly-mcp
     该项目提供16维司法文书异常检测能力，与本项目形成互补：
@@ -1076,8 +1314,10 @@ def query_anomaly_mcp(
 
     返回 JSON 字符串，包含：
     - available: anomaly-mcp 是否可用
-    - anomaly_results: 异常检测结果列表（不可用时为空列表）
-    - fallback_mode: 不可用时的回退模式说明
+    - auto_detected: 是否通过自动检测发现
+    - prompts: 各维度的检测 Prompt 列表（Agent 需发送给 LLM）
+    - dimensions: 请求检测的维度列表
+    - message: 操作说明
     """
     logger.info(
         "query_anomaly_mcp: >>> ENTER | doc_len=%d, requested_dims=%s",
@@ -1090,75 +1330,320 @@ def query_anomaly_mcp(
             logger.debug("query_anomaly_mcp: using default dimensions=%d", len(dimensions))
 
         available = ANOMALY_MCP_CONFIG["available"]
+        auto_detected = ANOMALY_MCP_CONFIG.get("auto_detected", False)
         logger.info(
-            "query_anomaly_mcp: anomaly-mcp availability check | server=%s, available=%s, fallback=%s",
+            "query_anomaly_mcp: anomaly-mcp availability | server=%s, available=%s, auto_detected=%s",
             ANOMALY_MCP_CONFIG["server_name"],
             available,
-            ANOMALY_MCP_CONFIG["fallback_mode"],
+            auto_detected,
         )
 
         if not available:
             logger.info(
-                "query_anomaly_mcp: anomaly-mcp NOT available, returning blank results (fallback=%s) | "
-                "Suggestion: install judicial-doc-anomaly-mcp from https://github.com/lcfactorization/judicial-doc-anomaly-mcp",
-                ANOMALY_MCP_CONFIG["fallback_mode"],
+                "query_anomaly_mcp: anomaly-mcp NOT available, returning blank results"
             )
             result = {
                 "success": True,
                 "available": False,
+                "auto_detected": False,
                 "anomaly_results": [],
+                "prompts": [],
+                "dimensions": dimensions,
                 "fallback_mode": ANOMALY_MCP_CONFIG["fallback_mode"],
                 "message": (
-                    "judicial-doc-anomaly-mcp 当前不可用。"
-                    "异常扣分项将留空白。"
-                    "如需启用，请在 MCP 客户端配置中添加 judicial-lint server，"
-                    "并将 ANOMALY_MCP_AVAILABLE 设为 true。"
-                    "推荐安装：https://github.com/lcfactorization/judicial-doc-anomaly-mcp"
+                    "judicial-doc-anomaly-mcp 当前不可用（未检测到安装）。"
+                    "异常扣分项将留空白，质量评估流程不受影响。"
                 ),
                 "suggestion": (
-                    "Agent 可继续执行质量评估流程，"
-                    "在 apply_anomaly_deduction 中 anomaly_items 参数传空即可。"
-                    "如需异常检测结果，请确保 judicial-doc-anomaly-mcp 已正确配置并运行。"
-                    "安装方式：pip install judicial-doc-anomaly-mcp 或 clone 上述仓库"
+                    "如需启用异常检测联动，请安装：pip install judicial-lint-mcp "
+                    "或参考 https://github.com/lcfactorization/judicial-doc-anomaly-mcp"
                 ),
             }
-            logger.info(
-                "query_anomaly_mcp: <<< EXIT (unavailable) | returning %d anomaly_results",
-                len(result["anomaly_results"]),
-            )
+            logger.info("query_anomaly_mcp: <<< EXIT (unavailable)")
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+        try:
+            from judicial_lint_mcp.server import render_skill, list_skills
+        except ImportError:
+            logger.warning("query_anomaly_mcp: anomaly-mcp import failed, falling back")
+            ANOMALY_MCP_CONFIG["available"] = False
+            result = {
+                "success": True,
+                "available": False,
+                "auto_detected": False,
+                "anomaly_results": [],
+                "prompts": [],
+                "dimensions": dimensions,
+                "fallback_mode": "import_failed",
+                "message": "judicial-doc-anomaly-mcp 导入失败，已自动降级为不可用模式。",
+                "suggestion": "请检查 judicial-lint-mcp 安装是否完整。",
+            }
             return json.dumps(result, ensure_ascii=False, indent=2)
 
         logger.info(
-            "query_anomaly_mcp: anomaly-mcp IS available, preparing call for %d dimensions: %s",
-            len(dimensions), dimensions,
+            "query_anomaly_mcp: anomaly-mcp IS available, generating prompts for %d dimensions",
+            len(dimensions),
         )
+
+        prompts = []
+        for idx, dim in enumerate(dimensions):
+            try:
+                prompt_json = render_skill(
+                    dimension=dim,
+                    case_material=document_text,
+                    dimension_index=idx,
+                )
+                prompt_data = json.loads(prompt_json)
+                prompts.append({
+                    "dimension": dim,
+                    "dimension_index": idx,
+                    "system_prompt": prompt_data.get("system_prompt", ""),
+                    "user_prompt": prompt_data.get("user_prompt", ""),
+                    "estimated_tokens": prompt_data.get("estimated_tokens", 0),
+                })
+                logger.debug("query_anomaly_mcp: generated prompt for dim=%s", dim)
+            except Exception as e:
+                logger.warning("query_anomaly_mcp: failed to generate prompt for dim=%s: %s", dim, e)
+                prompts.append({
+                    "dimension": dim,
+                    "dimension_index": idx,
+                    "error": str(e),
+                })
+
+        _anomaly_session["dimensions"] = dimensions
+        _anomaly_session["collected_results"] = {}
+        _anomaly_session["total_dimensions"] = len(dimensions)
+        _anomaly_session["document_text"] = document_text
+
         result = {
             "success": True,
             "available": True,
+            "auto_detected": auto_detected,
             "anomaly_results": [],
+            "prompts": prompts,
+            "dimensions": dimensions,
+            "total_prompts": len(prompts),
             "message": (
-                "anomaly-mcp 已配置但尚未实现自动调用，"
-                "请Agent手动调用 judicial-lint 的 render_skill 和 parse_response 工具获取异常检测结果。"
-                "参考：https://github.com/lcfactorization/judicial-doc-anomaly-mcp"
+                f"已自动检测到 judicial-doc-anomaly-mcp 并生成 {len(prompts)} 个维度的检测 Prompt。"
+                "请将每个 Prompt 的 system_prompt + user_prompt 发送给 LLM，"
+                "再将 LLM 响应通过 submit_anomaly_response 提交解析。"
             ),
-            "suggestion": (
-                "调用流程：1) 调用 judicial-lint 的 render_skill 获取异常检测Prompt "
-                "2) 将Prompt发送给LLM获取响应 "
-                "3) 调用 judicial-lint 的 parse_response 解析结果 "
-                "4) 将解析结果传入本工具的 apply_anomaly_deduction"
+            "next_step": (
+                "对每个 prompt 调用 submit_anomaly_response(dimension, llm_response, dimension_index)，"
+                "全部完成后调用 finalize_anomaly_detection() 获取汇总结果。"
+            ),
+        }
+        logger.info("query_anomaly_mcp: <<< EXIT (available) | %d prompts generated", len(prompts))
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("query_anomaly_mcp: <<< EXIT (ERROR) | exception=%s", e, exc_info=True)
+        return _make_error(ErrorCode.INTERNAL_ERROR, f"异常MCP查询异常：{e}", retryable=True)
+
+
+_anomaly_session: dict = {
+    "dimensions": [],
+    "collected_results": {},
+    "total_dimensions": 0,
+    "document_text": "",
+}
+
+
+@mcp.tool()
+def submit_anomaly_response(
+    dimension: str,
+    llm_response: str,
+    dimension_index: int = 0,
+) -> str:
+    """提交 LLM 对某个异常检测维度的响应，自动解析为结构化异常数据。
+
+    当 query_anomaly_mcp 返回 prompts 后，Agent 将每个 prompt 发送给 LLM，
+    再将 LLM 的响应通过此工具提交。本工具会自动调用 anomaly-mcp 的
+    parse_response 进行解析，并将结果暂存到会话中。
+
+    全部维度完成后，调用 finalize_anomaly_detection 获取汇总结果。
+
+    dimension: 维度标识（如 'procedure', 'evidence', 'fact_finding'）
+    llm_response: LLM 返回的原始响应文本
+    dimension_index: 维度索引（0-15），用于分类体系映射
+
+    返回 JSON 字符串，包含：
+    - dimension: 维度标识
+    - anomaly_count: 检出的异常项数量
+    - risk_level: 风险等级
+    - progress: 当前收集进度（已收集/总维度数）
+    """
+    logger.info(
+        "submit_anomaly_response: >>> ENTER | dimension=%s, dim_index=%d, response_len=%d",
+        dimension, dimension_index, len(llm_response),
+    )
+    try:
+        try:
+            from judicial_lint_mcp.server import parse_response as anomaly_parse
+        except ImportError:
+            result = {
+                "success": False,
+                "error": "judicial-doc-anomaly-mcp 不可用，无法解析响应。",
+                "dimension": dimension,
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+        parsed_json = anomaly_parse(
+            dimension=dimension,
+            response=llm_response,
+            dimension_index=dimension_index,
+        )
+        parsed_data = json.loads(parsed_json)
+
+        if "error" in parsed_data:
+            logger.warning("submit_anomaly_response: parse error for dim=%s: %s", dimension, parsed_data["error"])
+            _anomaly_session["collected_results"][dimension] = {
+                "dimension": dimension,
+                "anomaly_count": 0,
+                "risk_level": "unknown",
+                "anomalies": [],
+                "summary": f"解析失败：{parsed_data['error']}",
+            }
+        else:
+            _anomaly_session["collected_results"][dimension] = parsed_data
+            logger.info(
+                "submit_anomaly_response: parsed dim=%s | anomaly_count=%d, risk_level=%s",
+                dimension,
+                parsed_data.get("anomaly_count", 0),
+                parsed_data.get("risk_level", "unknown"),
+            )
+
+        collected = len(_anomaly_session["collected_results"])
+        total = _anomaly_session["total_dimensions"]
+
+        result = {
+            "success": True,
+            "dimension": dimension,
+            "anomaly_count": parsed_data.get("anomaly_count", 0),
+            "risk_level": parsed_data.get("risk_level", "unknown"),
+            "progress": f"{collected}/{total}",
+            "is_complete": collected >= total,
+            "next_step": (
+                "继续提交剩余维度的响应，或如果全部完成则调用 finalize_anomaly_detection()"
+                if collected < total
+                else "所有维度已收集完毕，请调用 finalize_anomaly_detection() 获取汇总结果"
+            ),
+        }
+        logger.info("submit_anomaly_response: <<< EXIT | progress=%d/%d", collected, total)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("submit_anomaly_response: <<< EXIT (ERROR) | %s", e, exc_info=True)
+        return _make_error(ErrorCode.INTERNAL_ERROR, f"提交异常响应失败：{e}", retryable=True)
+
+
+@mcp.tool()
+def finalize_anomaly_detection() -> str:
+    """汇总所有已提交的异常检测结果，生成最终异常数据。
+
+    在 Agent 完成所有维度的 submit_anomaly_response 后调用此工具，
+    获取汇总的异常检测结果列表，可直接传入 apply_anomaly_deduction
+    和 generate_report 的 anomaly_mcp_results 参数。
+
+    返回 JSON 字符串，包含：
+    - anomaly_results: 所有维度的异常检测结果列表
+    - total_anomalies: 检出的异常项总数
+    - risk_summary: 各风险等级的统计
+    - dimensions_scanned: 已扫描的维度列表
+    - dimensions_missing: 未提交响应的维度列表
+    """
+    logger.info("finalize_anomaly_detection: >>> ENTER")
+    try:
+        collected = _anomaly_session["collected_results"]
+        total_dims = _anomaly_session["total_dimensions"]
+        all_dimensions = _anomaly_session["dimensions"]
+
+        anomaly_results = []
+        total_anomalies = 0
+        risk_summary = {"critical": 0, "high": 0, "medium": 0, "low": 0, "unknown": 0}
+
+        for dim_key in all_dimensions:
+            dim_data = collected.get(dim_key)
+            if dim_data is None:
+                continue
+            anomaly_results.append(dim_data)
+            count = dim_data.get("anomaly_count", 0)
+            total_anomalies += count
+            risk = dim_data.get("risk_level", "unknown")
+            risk_summary[risk] = risk_summary.get(risk, 0) + 1
+
+        missing = [d for d in all_dimensions if d not in collected]
+
+        result = {
+            "success": True,
+            "anomaly_results": anomaly_results,
+            "total_anomalies": total_anomalies,
+            "risk_summary": risk_summary,
+            "dimensions_scanned": list(collected.keys()),
+            "dimensions_missing": missing,
+            "total_dimensions": total_dims,
+            "completed": len(missing) == 0,
+            "message": (
+                f"异常检测汇总完成：共扫描 {len(collected)}/{total_dims} 个维度，"
+                f"检出 {total_anomalies} 项异常。"
+                + ("所有维度已完成。" if not missing else f"未完成维度：{', '.join(missing)}")
+            ),
+            "next_step": (
+                "将 anomaly_results 传入 apply_anomaly_deduction 计算扣分，"
+                "再传入 generate_report 的 anomaly_mcp_results 参数生成合并报告。"
             ),
         }
         logger.info(
-            "query_anomaly_mcp: <<< EXIT (available, manual mode) | returning %d anomaly_results",
-            len(result["anomaly_results"]),
+            "finalize_anomaly_detection: <<< EXIT | %d/%d dims, %d anomalies",
+            len(collected), total_dims, total_anomalies,
         )
         return json.dumps(result, ensure_ascii=False, indent=2)
     except Exception as e:
-        logger.error(
-            "query_anomaly_mcp: <<< EXIT (ERROR) | exception=%s, doc_len=%d",
-            e, len(document_text), exc_info=True,
-        )
-        return _make_error(ErrorCode.INTERNAL_ERROR, f"异常MCP查询异常：{e}", retryable=True)
+        logger.error("finalize_anomaly_detection: <<< EXIT (ERROR) | %s", e, exc_info=True)
+        return _make_error(ErrorCode.INTERNAL_ERROR, f"汇总异常检测失败：{e}", retryable=True)
+
+
+@mcp.tool()
+def check_anomaly_mcp_status() -> str:
+    """检查 judicial-doc-anomaly-mcp 的安装和运行状态。
+
+    返回 JSON 字符串，包含：
+    - installed: 是否已安装
+    - auto_detected: 是否通过自动检测发现
+    - importable: 是否可成功导入
+    - server_name: MCP 服务器名称
+    - supported_dimensions: 支持的检测维度列表
+    - version: 版本号（如可获取）
+    """
+    logger.info("check_anomaly_mcp_status: >>> ENTER")
+    try:
+        auto_detected = ANOMALY_MCP_CONFIG.get("auto_detected", False)
+        importable = False
+        version = None
+        try:
+            import judicial_lint_mcp
+            importable = True
+            version = getattr(judicial_lint_mcp, "__version__", None)
+        except ImportError:
+            pass
+
+        result = {
+            "success": True,
+            "installed": auto_detected or importable,
+            "auto_detected": auto_detected,
+            "importable": importable,
+            "server_name": ANOMALY_MCP_CONFIG["server_name"],
+            "supported_dimensions": ANOMALY_MCP_CONFIG["supported_dimensions"],
+            "version": version,
+            "message": (
+                f"judicial-doc-anomaly-mcp 状态：{'已安装可导入' if importable else '未安装或不可导入'}"
+                + (f"（v{version}）" if version else "")
+                + f"，自动检测：{'通过' if auto_detected else '未通过'}"
+            ),
+        }
+        logger.info("check_anomaly_mcp_status: <<< EXIT | importable=%s", importable)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("check_anomaly_mcp_status: <<< EXIT (ERROR) | %s", e, exc_info=True)
+        return _make_error(ErrorCode.INTERNAL_ERROR, f"状态检查异常：{e}")
 
 
 @mcp.tool()

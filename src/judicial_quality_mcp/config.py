@@ -1,11 +1,36 @@
 """Configuration management for judicial-doc-quality-mcp v0.1.0"""
 
+import importlib
+import logging
 import os
 from enum import Enum
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("judicial-quality")
+
+
+def _detect_anomaly_mcp() -> bool:
+    """Auto-detect whether judicial-doc-anomaly-mcp is installed and importable."""
+    try:
+        mod = importlib.import_module("judicial_lint_mcp")
+        has_server = hasattr(mod, "server") or importlib.util.find_spec("judicial_lint_mcp.server") is not None
+        if has_server:
+            logger.info("_detect_anomaly_mcp: judicial-lint-mcp detected and importable")
+            return True
+        logger.info("_detect_anomaly_mcp: judicial-lint-mcp found but server module missing")
+        return False
+    except ImportError:
+        logger.info("_detect_anomaly_mcp: judicial-lint-mcp not installed")
+        return False
+    except Exception as e:
+        logger.warning("_detect_anomaly_mcp: detection error: %s", e)
+        return False
+
+
+ANOMALY_MCP_AUTO_DETECTED = _detect_anomaly_mcp()
 
 QUALITY_DIMENSIONS = [
     "formal_specification",
@@ -30,11 +55,14 @@ QUALITY_WEIGHTS = {
 QUALITY_FULL_SCORES = {dim: 100 for dim in QUALITY_DIMENSIONS}
 
 QUALITY_GRADES = {
-    "A": (90, 100, "优秀"),
-    "B": (75, 89, "良好"),
-    "C": (60, 74, "合格"),
-    "D": (40, 59, "不合格"),
-    "F": (0, 39, "严重缺陷"),
+    "A": (95, 100, "优秀"),
+    "A-": (90, 94, "优良"),
+    "B+": (85, 89, "良好"),
+    "B": (80, 84, "中上"),
+    "C+": (75, 79, "中等"),
+    "C": (70, 74, "中下"),
+    "D": (60, 69, "及格"),
+    "F": (0, 59, "不及格"),
 }
 
 DIMENSION_TITLES = {
@@ -117,10 +145,11 @@ COMPARISON_CONFIG = {
 
 ANOMALY_MCP_CONFIG = {
     "server_name": "judicial-lint",
-    "available": False,
+    "available": ANOMALY_MCP_AUTO_DETECTED,
+    "auto_detected": ANOMALY_MCP_AUTO_DETECTED,
     "fallback_mode": "blank",
     "recommended_install": "https://github.com/lcfactorization/judicial-doc-anomaly-mcp",
-    "pip_install": "pip install judicial-doc-anomaly-mcp",
+    "pip_install": "pip install judicial-lint-mcp",
     "supported_dimensions": [
         "procedure", "evidence", "fact_finding", "focus_drift",
         "law_application", "discretion", "rhetoric_trick", "logic",

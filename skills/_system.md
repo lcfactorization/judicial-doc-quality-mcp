@@ -46,14 +46,23 @@
 
 ## 异常检测联动（Anomaly MCP Integration）
 
-> [!NOTE]
-> 本项目支持与 [judicial-doc-anomaly-mcp](https://github.com/lcfactorization/judicial-doc-anomaly-mcp) 联动，实现「质量评分 + 异常扣分」的综合评估。
+> [!TIP]
+> 本项目支持与 [judicial-doc-anomaly-mcp](https://github.com/lcfactorization/judicial-doc-anomaly-mcp) 自动联动，实现「质量评分 + 异常扣分」的综合评估。
+> 系统启动时自动检测 anomaly-mcp 是否已安装，无需手动配置。
 
 推荐工作流：
-1. 先调用 `query_anomaly_mcp` 获取异常检测结果（若anomaly-mcp不可用，结果为空，不影响质量评估）
-2. 将异常检测结果传入 `apply_anomaly_deduction` 计算扣分
-3. 在 `calculate_weighted_score` 中同时传入 anomaly_items 和 innovation_items
-4. 最终报告将同时体现质量评分、异常扣分和创新加分
+1. 调用 `check_anomaly_mcp_status()` 确认 anomaly-mcp 状态
+2. 调用 `query_anomaly_mcp(document_text)` 获取检测 Prompt 列表
+3. 对每个 Prompt，将 system_prompt + user_prompt 发送给 LLM
+4. 将 LLM 响应通过 `submit_anomaly_response(dimension, llm_response, dimension_index)` 提交解析
+5. 全部维度完成后调用 `finalize_anomaly_detection()` 获取汇总结果
+6. 将汇总结果传入 `apply_anomaly_deduction` 计算扣分
+7. 在 `calculate_weighted_score` 中同时传入 anomaly_items 和 innovation_items
+8. 最终报告将同时体现质量评分、异常扣分和创新加分
+
+> [!NOTE]
+> 如果 judicial-doc-anomaly-mcp 未安装，`query_anomaly_mcp` 返回空白结果，质量评估流程不受影响。
+> 安装方式：`pip install judicial-lint-mcp`，安装后系统自动检测并启用联动。
 
 anomaly-mcp 提供16维异常检测能力：
 - 程序异常（procedure）、证据异常（evidence）、事实认定异常（fact_finding）
@@ -65,6 +74,10 @@ anomaly-mcp 提供16维异常检测能力：
 ## 辅助检测工具
 
 在质量评估之外，本MCP Server还提供以下辅助检测工具：
+- `check_anomaly_mcp_status`：检查 judicial-doc-anomaly-mcp 的安装和运行状态
+- `query_anomaly_mcp`：自动检测并调用 anomaly-mcp，生成各维度检测 Prompt
+- `submit_anomaly_response`：提交 LLM 对异常检测维度的响应，自动解析
+- `finalize_anomaly_detection`：汇总所有异常检测结果，生成最终异常数据
 - `extract_timeline`：提取文书时间线，检测时间倒置、缺口等异常
 - `trace_evidence_references`：追踪证据引用情况，检测采信缺失
 - `detect_evasive_patterns`：检测规避责任写作模式（模糊主体、模板化说理等）

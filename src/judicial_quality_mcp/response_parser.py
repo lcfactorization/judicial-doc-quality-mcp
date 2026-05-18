@@ -14,6 +14,7 @@ from .config import (
     DIMENSION_TITLES,
     INNOVATION_BONUS,
     INNOVATION_TOTAL_MAX_BONUS,
+    QUALITY_GRADES,
     QUALITY_WEIGHTS,
 )
 
@@ -352,13 +353,7 @@ class ResponseParser:
 
     @staticmethod
     def _determine_grade(total: float) -> tuple[str, str]:
-        if total >= 90:
-            return "A", "优秀"
-        elif total >= 75:
-            return "B", "良好"
-        elif total >= 60:
-            return "C", "合格"
-        elif total >= 40:
-            return "D", "不合格"
-        else:
-            return "F", "严重缺陷"
+        for grade_key, (lo, hi, desc) in QUALITY_GRADES.items():
+            if lo <= total <= hi:
+                return grade_key, desc
+        return "F", "不及格"

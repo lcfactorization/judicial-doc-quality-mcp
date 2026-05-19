@@ -15,7 +15,7 @@ from judicial_quality_mcp.server import (
     analyze_legal_difficulty,
 )
 
-doc_path = r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\workbuddyKimiK26_完美模拟二审判决书_苏06民终6271号_20260518.md"
+doc_path = r"[匿名化路径]"
 with open(doc_path, encoding="utf-8") as f:
     doc_text = f.read()
 
@@ -292,7 +292,7 @@ case_prec = json.loads(query_case_precedent(
 print(f"  case_precedent: precedents={len(case_prec.get('precedents', []))}, conflicts={len(case_prec.get('conflict_points', []))}")
 
 supp_doc = json.loads(submit_supplementary_doc(
-    case_id="苏06民终6271号",
+    case_id="[匿名化案号]",
     doc_type="law_analysis",
     doc_title="加班工资计算基数的法律适用分析——以江苏省司法实践为视角",
     doc_content="本文分析江苏省法院对加班工资计算基数的裁判规则，指出基本工资与应发工资作为计算基数的分歧...",
@@ -332,7 +332,7 @@ report_result = json.loads(generate_report(
     evasive_result=evasive,
     evidence_result=evidence,
     document_meta={
-        "案号": "（2025）苏06民终6271号",
+        "案号": "[匿名化案号]",
         "法院": "江苏省南通市中级人民法院",
         "案件类型": "劳动争议",
         "审理程序": "二审",
@@ -350,7 +350,7 @@ report_result = json.loads(generate_report(
 
 report_md = report_result.get("report_markdown", "")
 today_str = datetime.now().strftime("%Y%m%d")
-output_path = rf"C:\Users\stere\WorkBuddy\2026-05-18-task-3\质量评估报告_苏06民终6271号_{today_str}.md"
+output_path = rf"[匿名化路径]\质量评估报告_[匿名化案号]_{today_str}.md"
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(report_md)
 

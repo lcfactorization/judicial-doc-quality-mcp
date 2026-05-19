@@ -1,4 +1,4 @@
-with open(r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\质量评估报告_苏06民终6271号_20260519.md", encoding="utf-8") as f:
+with open(r"[匿名化路径]\质量评估报告_[匿名化案号]_20260519.md", encoding="utf-8") as f:
     content = f.read()
 lines = content.split("\n")
 
@@ -14,7 +14,7 @@ print()
 print("=" * 60)
 print("2. 日期一致性检查")
 print("=" * 60)
-if "20260519" in r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\质量评估报告_苏06民终6271号_20260519.md":
+if "20260519" in r"[匿名化路径]\质量评估报告_[匿名化案号]_20260519.md":
     print("  OK: 文件名日期 20260519")
 if "2026-05-19" in content:
     print("  OK: 报告内检测日期 2026-05-19")

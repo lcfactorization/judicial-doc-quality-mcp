@@ -94,6 +94,30 @@ _loader = SkillLoader()
 _renderer = TemplateRenderer(_loader)
 
 
+def _infer_trial_stage(case_name: str, document_text: str = "") -> str:
+    if not case_name and not document_text:
+        return "未知"
+    search_text = case_name or document_text[:500]
+    if re.search(r"民终|行终|刑终|终字|终\d+号", search_text):
+        return "二审"
+    if re.search(r"民再|行再|刑再|再字|再\d+号", search_text):
+        return "再审"
+    if re.search(r"民初|行初|刑初|初字|初\d+号", search_text):
+        return "一审"
+    if re.search(r"劳仲|仲字|仲\d+号", search_text):
+        return "仲裁"
+    if re.search(r"行罚|行决|罚字", search_text):
+        return "行政"
+    if document_text:
+        if re.search(r"上诉人|被上诉人", document_text[:2000]):
+            return "二审"
+        if re.search(r"申诉人|被申诉人", document_text[:2000]):
+            return "再审"
+        if re.search(r"原告|被告", document_text[:2000]) and not re.search(r"上诉人|被上诉人", document_text[:2000]):
+            return "一审"
+    return "未知"
+
+
 def _estimate_tokens(text: str) -> int:
     zh_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
     en_chars = len(text) - zh_chars
@@ -308,9 +332,12 @@ def extract_document_sections(document_full_text: str) -> str:
         total = 7
         sections["extraction_confidence"] = round(filled / total, 2) if total > 0 else 0.0
 
+        case_number = case_info.get("case_number", "")
+        sections["trial_stage"] = _infer_trial_stage(case_number, document_full_text)
+
         logger.info(
-            "extract_document_sections: confidence=%.2f, sections_found=%d/%d",
-            sections["extraction_confidence"], filled, total,
+            "extract_document_sections: confidence=%.2f, sections_found=%d/%d, trial_stage=%s",
+            sections["extraction_confidence"], filled, total, sections["trial_stage"],
         )
 
         rule_engine_flags = _run_rule_engine(document_full_text, sections)
@@ -1043,6 +1070,7 @@ def generate_report(
     coupling_analysis: list[dict] | None = None,
     report_id: str | None = None,
     minimum_score_applied: bool = False,
+    trial_stage: str = "",
 ) -> str:
     """生成结构化 Markdown 评分报告。纯规则函数，零 Token 消耗。
 
@@ -1089,6 +1117,18 @@ def generate_report(
             lines.append("> **基础信息档案**")
             for k, v in document_meta.items():
                 lines.append(f"> - **{k}**：{v}")
+            if trial_stage:
+                lines.append(f"> - **审级**：{trial_stage}")
+                _STAGE_RESPONSIBILITY = {
+                    "一审": "一审法院对事实认定和法律适用负全部责任",
+                    "二审": "二审法院对一审判决的审查和自身裁判负责，不承担一审责任",
+                    "再审": "再审法院对原审生效判决的审查和再审裁判负责",
+                    "仲裁": "仲裁机构对仲裁裁决负责",
+                    "行政": "行政机关对行政决定负责",
+                }
+                resp = _STAGE_RESPONSIBILITY.get(trial_stage, "")
+                if resp:
+                    lines.append(f"> - **责任界定**：{resp}")
             lines.append(f"> - **检测时间**：{datetime.now().strftime('%Y-%m-%d')}")
             lines.append(f"> - **报告编号**：{report_id}")
             lines.append("")
@@ -2071,6 +2111,7 @@ def generate_html_report(
     coupling_analysis: list[dict] | None = None,
     minimum_score_applied: bool = False,
     report_id: str | None = None,
+    trial_stage: str = "",
 ) -> str:
     """生成精美的HTML格式质量评估报告，支持light/dark主题切换（默认dark）。
 
@@ -2104,6 +2145,7 @@ def generate_html_report(
             coupling_analysis=coupling_analysis,
             minimum_score_applied=minimum_score_applied,
             report_id=report_id,
+            trial_stage=trial_stage,
         ))
         md_content = md_result.get("report_markdown", "")
 

@@ -255,6 +255,13 @@ class ResponseParser:
                 validation["warnings"].append(
                     f"deduction_items[{i}]缺少net_anomaly字段（净异常判定必填）"
                 )
+            if "stage_scope" not in item:
+                item["stage_scope"] = ""
+                validation["warnings"].append(
+                    f"deduction_items[{i}]缺少stage_scope字段（审级归属必填），已设为空"
+                )
+            if "stage_unclear" not in item:
+                item["stage_unclear"] = False
 
     def _validate_bonus_items(self, items: list, validation: dict):
         if not isinstance(items, list):
@@ -354,6 +361,8 @@ class ResponseParser:
                         "f_code_desc": F_CODE_MAP.get(item.get("f_code", ""), ""),
                         "reverse_anomaly": item.get("reverse_anomaly", ""),
                         "net_anomaly": item.get("net_anomaly", ""),
+                        "stage_scope": item.get("stage_scope", ""),
+                        "stage_unclear": item.get("stage_unclear", False),
                     })
                     logger.debug(
                         "calculate_weighted_score: anomaly type=%s, severity=%s, deduction=%d, desc=%s",

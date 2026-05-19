@@ -238,13 +238,26 @@ NEGATIVE_LIST = {
 }
 
 
-def build_system_prompt(meta: SkillMeta) -> str:
+def build_system_prompt(meta: SkillMeta, trial_stage: str = "") -> str:
     """Build system prompt from SkillMeta and system skills."""
     parts = []
     parts.append(f"# 裁判文书质量评审专家 — {meta.title}维度")
     parts.append("")
     parts.append(f"你是一位资深的中国司法文书质量评审专家，正在评估裁判文书的【{meta.title}】维度。")
     parts.append(f"本维度权重：{meta.weight*100:.0f}%，满分：{meta.full_score}分。")
+    if trial_stage:
+        parts.append(f"当前文书审级：{trial_stage}")
+        _STAGE_TERM = {
+            "一审": "原告/被告",
+            "二审": "上诉人/被上诉人",
+            "再审": "申诉人/被申诉人",
+            "仲裁": "申请人/被申请人",
+            "行政": "投诉人/被投诉人",
+        }
+        terms = _STAGE_TERM.get(trial_stage, "当事人")
+        parts.append(f"获益方标注必须使用：{terms}，禁止使用其他审级术语。")
+        parts.append(f"评估范围：仅评{trial_stage}法院的裁判行为，不评判其他审级。")
+        parts.append(f"每个扣分项/加分项必须标注 stage_scope=\"{trial_stage}\"。")
     parts.append("")
     parts.append("请严格按照评分标准中的扣分项和加分项逐项检查，确保：")
     parts.append("1. 每个扣分项/加分项都有文书原文引用（original_text_location字段），禁止用'全文'、'多处'等模糊表述")

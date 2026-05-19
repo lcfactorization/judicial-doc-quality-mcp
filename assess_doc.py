@@ -1,4 +1,4 @@
-"""评估脚本：对（2025）苏06民终6271号判决书进行七维质量评估"""
+"""评估脚本：对[匿名化案号]二审判决书进行七维质量评估"""
 
 import json
 import sys
@@ -21,7 +21,7 @@ from judicial_quality_mcp.server import (
     pipeline_progress,
 )
 
-DOC_PATH = r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\workbuddyKimiK26_完美模拟二审判决书_苏06民终6271号_20260518.md"
+DOC_PATH = os.environ.get("DOC_PATH", r"[匿名化路径]")
 
 with open(DOC_PATH, "r", encoding="utf-8") as f:
     doc_text = f.read()

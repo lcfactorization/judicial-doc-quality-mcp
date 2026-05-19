@@ -8,6 +8,8 @@ class DeductionItem(BaseModel):
     deduction: int = Field(default=0, description="扣分值")
     quote: str = Field(default="", description="原文引用")
     basis: str = Field(default="", description="规范依据")
+    stage_scope: str = Field(default="", description="审级归属（一审/二审/再审/仲裁/行政/未知）")
+    stage_unclear: bool = Field(default=False, description="是否无法区分审级归属")
 
 
 class BonusItem(BaseModel):
@@ -49,6 +51,7 @@ class QualityAssessmentResult(BaseModel):
     grade: str = Field(default="")
     grade_description: str = Field(default="")
     cross_check: CrossCheckResult = Field(default_factory=CrossCheckResult)
+    trial_stage: str = Field(default="", description="审级（一审/二审/再审/仲裁/行政/未知）")
     report_markdown: str = Field(default="")
 
 
@@ -60,12 +63,13 @@ class ParsedScoreResult(BaseModel):
 
 
 class SectionExtractionResult(BaseModel):
-    plaintiff_claim: str = Field(default="", description="原告诉称/公诉机关指控")
-    defendant_defense: str = Field(default="", description="被告辩称")
+    plaintiff_claim: str = Field(default="", description="原告诉称/公诉机关指控/上诉人上诉请求")
+    defendant_defense: str = Field(default="", description="被告辩称/被上诉人答辩")
     court_finding: str = Field(default="", description="本院查明")
     evidence_analysis: str = Field(default="", description="证据分析/认证")
     reasoning: str = Field(default="", description="本院认为")
     judgment_basis: str = Field(default="", description="法律依据")
     judgment_main: str = Field(default="", description="判决主文")
     case_info: dict = Field(default_factory=dict, description="案件基本信息")
+    trial_stage: str = Field(default="", description="审级（一审/二审/再审/仲裁/行政/未知）")
     extraction_confidence: float = Field(default=0.0, description="提取置信度")

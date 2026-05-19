@@ -43,6 +43,20 @@ htmlcov/
 output/
 reports/
 
+# Sensitive - real case documents and test data
+*.real.md
+*真实判决书*
+*模拟判决书*
+test_docs/
+
+# Sensitive - generated reports with real case info
+*质量评估报告_苏*
+*综合比对报告_苏*
+*补充文档演示报告_苏*
+
+# Sensitive - debug/temp scripts with hardcoded paths
+_check_report.py
+
 # macOS
 .DS_Store
 

@@ -15,7 +15,7 @@ from judicial_quality_mcp.server import (
     generate_report,
 )
 
-CASE_ID = "苏06民终6271号"
+CASE_ID = "[匿名化案号]"
 
 print("=" * 60)
 print("补充说明文档提交与报告引用 — 完整演示")
@@ -187,7 +187,7 @@ report_result = json.loads(generate_report(
     anomaly_details=[{"label": "逻辑异常", "severity": "high", "deduction": 5, "description": "人格混同认定逻辑断裂"}],
     innovation_details=[{"label": "证据妨碍规则适用", "bonus": 3, "description": "对拒不提供工资台账适用举证妨碍规则"}],
     document_meta={
-        "案号": "（2025）苏06民终6271号",
+        "案号": "[匿名化案号]",
         "法院": "江苏省南通市中级人民法院",
         "案件类型": "劳动争议",
         "审理程序": "二审",
@@ -200,7 +200,7 @@ report_result = json.loads(generate_report(
 
 report_md = report_result.get("report_markdown", "")
 today_str = datetime.now().strftime("%Y%m%d")
-output_path = rf"C:\Users\stere\WorkBuddy\2026-05-18-task-3\补充文档演示报告_苏06民终6271号_{today_str}.md"
+output_path = rf"[匿名化路径]\补充文档演示报告_[匿名化案号]_{today_str}.md"
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(report_md)
 

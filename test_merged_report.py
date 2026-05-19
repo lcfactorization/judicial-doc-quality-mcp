@@ -58,7 +58,7 @@ result = generate_report(
     anomaly_details=[{"label": "逻辑异常", "severity": "high", "deduction": 5, "description": "逻辑闭环断裂"}],
     innovation_details=[{"label": "证据妨碍规则", "bonus": 3, "description": "适用证据妨碍规则"}],
     anomaly_mcp_results=anomaly_mcp_results,
-    document_meta={"案号": "（2024）苏01民终6271号", "法院": "江苏省南京市中级人民法院"},
+    document_meta={"案号": "[匿名化案号]", "法院": "[匿名化法院]"},
 )
 
 data = json.loads(result)

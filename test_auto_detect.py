@@ -1,7 +1,7 @@
 from judicial_quality_mcp.server import query_anomaly_mcp
 import json
 
-test_doc = "江苏省南京市中级人民法院民事判决书（2024）苏01民终6271号"
+test_doc = "江苏省[匿名化]中级人民法院民事判决书[匿名化案号]"
 result = query_anomaly_mcp(test_doc, dimensions=["procedure", "evidence"])
 data = json.loads(result)
 print("available:", data.get("available"))

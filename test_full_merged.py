@@ -8,7 +8,7 @@ from judicial_quality_mcp.server import (
     trace_evidence_references,
 )
 
-doc_path = r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\workbuddyKimiK26_完美模拟二审判决书_苏06民终6271号_20260518.md"
+doc_path = r"[匿名化路径]"
 with open(doc_path, encoding="utf-8") as f:
     doc_text = f.read()
 
@@ -92,7 +92,7 @@ report_result = json.loads(generate_report(
     evasive_result=evasive,
     evidence_result=evidence,
     document_meta={
-        "案号": "（2025）苏06民终6271号",
+        "案号": "[匿名化案号]",
         "法院": "江苏省南通市中级人民法院",
         "案件类型": "劳动争议",
         "审理程序": "二审",
@@ -100,7 +100,7 @@ report_result = json.loads(generate_report(
 ))
 
 report_md = report_result.get("report_markdown", "")
-output_path = r"C:\Users\stere\WorkBuddy\2026-05-18-task-3\质量评估报告_苏06民终6271号_20260518.md"
+output_path = r"[匿名化路径]\质量评估报告_[匿名化案号].md"
 with open(output_path, "w", encoding="utf-8") as f:
     f.write(report_md)
 

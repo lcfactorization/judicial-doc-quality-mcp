@@ -9,6 +9,8 @@
     "quote": "从文书中摘录一处最能体现该维度质量（好或差）的原文段落，不超过200字",
     "reasoning": "一句话概括评分理由，包含主要扣分项或加分项",
     "score": 78,
+    "stage_scope": "二审",
+    "stage_unclear": false,
     "deduction_items": [
         {
             "item": "扣分项名称（对应编号）",
@@ -24,6 +26,8 @@
             "beneficiary": "获益方（根据程序阶段使用对应术语）",
             "confidence": "置信度（0.0-1.0）",
             "severity": "严重度（疑似/可能/高度可能/确定）",
+            "stage_scope": "审级归属（一审/二审/再审/仲裁/行政/未知）",
+            "stage_unclear": false,
             "q1_alternative": "是否存在合理解释？如有，说明",
             "q2_subjective_intent": "是否存在主观恶意证据？如有，说明",
             "q3_contradictory_evidence": "是否存在反向证据？如有，说明",
@@ -76,6 +80,8 @@
 | conclusion | string | 是 | 对抗校验结论：成立/存疑/不成立 |
 | reverse_anomaly | string | 否 | 反向异常点描述 |
 | net_anomaly | string | 是 | 净异常判定：成立/存疑/不成立 |
+| stage_scope | string | 是 | 审级归属：一审/二审/再审/仲裁/行政/未知 |
+| stage_unclear | boolean | 是 | 是否无法区分审级归属，默认false |
 
 ### 加分项新增字段说明
 

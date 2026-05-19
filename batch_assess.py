@@ -26,14 +26,14 @@ from judicial_quality_mcp.server import (
     analyze_legal_difficulty,
 )
 
-BASE_DIR = r"C:\Users\stere\Documents\Obsidian Vault"
+BASE_DIR = os.environ.get("BATCH_BASE_DIR", r"[匿名化路径]")
 
 DOC_FILES = [
-    "终极版_模拟二审判决书_苏06民终6271号劳动争议_V23+_20260512.md",
-    "TraeGLM51_模拟二审判决书_苏06民终6271号劳动争议_V12_20260517.md",
-    "TraeGLM51_模拟二审判决书_苏06民终6271号劳动争议_V11_20260517.md",
-    "TraeGLM51_模拟二审判决书_苏06民终6271号劳动争议_V10_20260517.md",
-    "终极版_模拟二审判决书_苏06民终6271号劳动争议_V23++_20260512.md",
+    "[匿名化]_模拟二审判决书_[匿名化案号]劳动争议_V23+.md",
+    "[匿名化]_模拟二审判决书_[匿名化案号]劳动争议_V12.md",
+    "[匿名化]_模拟二审判决书_[匿名化案号]劳动争议_V11.md",
+    "[匿名化]_模拟二审判决书_[匿名化案号]劳动争议_V10.md",
+    "[匿名化]_模拟二审判决书_[匿名化案号]劳动争议_V23++.md",
 ]
 
 VERSION_LABELS = ["V23+", "V12", "V11", "V10", "V23++"]
@@ -414,8 +414,8 @@ def process_document(filepath, version_label):
         evasive_result=evasive,
         evidence_result=evidence,
         document_meta={
-            "案号": "（2025）苏06民终6271号",
-            "法院": "江苏省南通市中级人民法院",
+            "案号": "[匿名化案号]",
+            "法院": "[匿名化法院]",
             "案件类型": "劳动争议",
             "审理程序": "二审",
             "版本": version_label,
@@ -431,7 +431,7 @@ def process_document(filepath, version_label):
     ))
 
     report_md = report_result.get("report_markdown", "")
-    short_name = filepath.stem.replace("模拟二审判决书_", "").replace("苏06民终6271号劳动争议_", "")
+    short_name = filepath.stem.replace("模拟二审判决书_", "").replace("[匿名化案号]劳动争议_", "")
     output_path = filepath.parent / f"质量评估报告_{short_name}_{today_str}.md"
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(report_md)
@@ -451,7 +451,7 @@ def process_document(filepath, version_label):
         anomaly_deduction=anomaly_deduction,
         innovation_bonus=innovation_bonus,
         document_meta={
-            "案号": "（2025）苏06民终6271号",
+            "案号": "[匿名化案号]",
             "案件类型": "劳动争议",
             "版本": version_label,
         },
@@ -502,7 +502,7 @@ def generate_comparison_report(all_results):
     lines.append("# 模拟判决书异常点检测与质量评估综合比对报告\n")
     lines.append(f"> [!NOTE]")
     lines.append(f"> **基础信息档案**")
-    lines.append(f"> - **案号**：（2025）苏06民终6271号")
+    lines.append(f"> - **案号**：[匿名化案号]")
     lines.append(f"> - **案件类型**：劳动争议")
     lines.append(f"> - **比对版本数**：{len(all_results)}")
     lines.append(f"> - **检测日期**：{datetime.now().strftime('%Y-%m-%d')}")
@@ -852,7 +852,7 @@ def main():
     print("=" * 60)
 
     comparison_md = generate_comparison_report(all_results)
-    comparison_path = Path(BASE_DIR) / f"综合比对报告_苏06民终6271号_5版本_{today_str}.md"
+    comparison_path = Path(BASE_DIR) / f"综合比对报告_[匿名化案号]_5版本_{today_str}.md"
     with open(comparison_path, "w", encoding="utf-8") as f:
         f.write(comparison_md)
     print(f"综合比对Markdown报告已保存: {comparison_path.name}")
@@ -860,7 +860,7 @@ def main():
     from judicial_quality_mcp.server import _md_to_rich_html, _build_html_page
     comparison_html_body = _md_to_rich_html(comparison_md)
     comparison_html = _build_html_page(comparison_html_body, f"COMPARE-{today_str}")
-    comparison_html_path = Path(BASE_DIR) / f"综合比对报告_苏06民终6271号_5版本_{today_str}.html"
+    comparison_html_path = Path(BASE_DIR) / f"综合比对报告_[匿名化案号]_5版本_{today_str}.html"
     with open(comparison_html_path, "w", encoding="utf-8") as f:
         f.write(comparison_html)
     print(f"综合比对HTML报告已保存: {comparison_html_path.name}")

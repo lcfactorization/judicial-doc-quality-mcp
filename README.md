@@ -19,6 +19,10 @@
 - **规避模式检测**：自动识别文书中的模糊主体、时间模糊、回避回应等规避责任写作模式
 - **时间线提取与异常检测**：从文书中提取时间线事件，检测时间倒置等异常
 - **证据引用追踪**：追踪文书中的证据引用情况，检测证据采信缺失
+- **法律法规数据库**：内置国家法律、司法解释、地方法规，支持法律适用优先级排序（特别法优于一般法、新法优于旧法、上位法优于下位法）、冲突检测和溯及力分析
+- **类案判例数据库**：基于案件类型和关键事实检索类案判例，分析裁判倾向、偏离点和冲突点，支持指导性案例、公报案例等多层级检索
+- **补充说明文档提交**：支持针对特定案例提交法律适用分析、学术观点、类案对比、法谚说明、伦理道德、前沿问题、创新论证等7种类型的补充文档，可在报告中引用
+- **法律适用难点分析**：识别法律模糊地带和前沿问题，引用法谚和法律原则（如"任何人不得从违法行为中获利"），分析社会伦理道德和公序良俗考量，在不突破法律明文规定的前提下提供突破性创新空间
 - **民商事专项标准**：内置民商事裁判文书专项法律依据、审理经过必须交代事项、法条引用格式规范等
 - **交叉一致性检查**：自动检测各维度评分间的逻辑冲突（如事实清楚高分但证据充分低分）
 - **Token 预算估算**：在渲染 Prompt 前预估 Token 消耗，避免上下文溢出
@@ -104,7 +108,7 @@ cp .env.example .env
 
 ## 使用
 
-### 工具列表（17个 MCP 工具）
+### 工具列表（21个 MCP 工具）
 
 | 工具名称 | 功能 | Token 消耗 |
 |:---|:---|:---|
@@ -125,6 +129,10 @@ cp .env.example .env
 | `trace_evidence_references` | 追踪证据引用情况 | 零 |
 | `detect_evasive_patterns` | 检测规避责任写作模式 | 零 |
 | `pipeline_progress` | 查询评估流水线进度 | 零 |
+| `query_law_database` | 查询法律法规数据库，检测法律适用优先级、冲突和溯及力问题 | 零 |
+| `query_case_precedent` | 查询类案判例数据库，检测类案冲突和偏离 | 零 |
+| `submit_supplementary_doc` | 提交补充说明文件，可在报告中引用 | 零 |
+| `analyze_legal_difficulty` | 分析法律适用难点和前沿问题，支持法谚、公序良俗、突破性创新 | 零 |
 
 ### 典型评估流程
 
@@ -138,8 +146,12 @@ cp .env.example .env
 7. detect_evasive_patterns    → 检测规避模式
 8. extract_timeline           → 提取时间线
 9. trace_evidence_references  → 追踪证据引用
-10. calculate_weighted_score  → 计算加权总分
-11. generate_report           → 生成评估报告
+10. query_law_database        → 查询法律法规数据库（优先级、冲突、溯及力）
+11. query_case_precedent      → 查询类案判例（冲突、偏离、创新空间）
+12. submit_supplementary_doc  → 提交补充说明文档（可选）
+13. analyze_legal_difficulty  → 分析法律适用难点（法谚、公序良俗、前沿问题）
+14. calculate_weighted_score  → 计算加权总分
+15. generate_report           → 生成评估报告
 ```
 
 ### 七维评分体系
@@ -159,7 +171,7 @@ cp .env.example .env
 ```
 judicial-doc-quality-mcp/
 ├── src/judicial_quality_mcp/   # 核心源码
-│   ├── server.py               # MCP 服务器（17个工具）
+│   ├── server.py               # MCP 服务器（21个工具）
 │   ├── config.py               # 配置管理
 │   ├── models.py               # 数据模型
 │   ├── response_parser.py      # 响应解析器

@@ -19,6 +19,10 @@ English | [中文](./README.md)
 - **Evasive Pattern Detection**: Automatically identifies vague subjects, evasive timing, and missing responses — patterns used to evade responsibility in legal writing.
 - **Timeline Extraction & Anomaly Detection**: Extracts timeline events from documents and detects temporal inversions.
 - **Evidence Reference Tracing**: Tracks evidence citations in documents and detects missing evidence reasoning.
+- **Law Database**: Built-in national laws, judicial interpretations, and local regulations. Supports legal priority ranking (special law over general law, new law over old law, higher law over lower law), conflict detection, and retroactivity analysis.
+- **Case Precedent Database**: Retrieves case precedents based on case type and key facts. Analyzes adjudication tendencies, deviation points, and conflict points. Supports multi-level precedent retrieval (guiding cases, gazette cases, etc.).
+- **Supplementary Document Submission**: Supports 7 types of supplementary documents (legal analysis, academic opinions, precedent comparison, legal maxim, ethics/morality, frontier issues, innovation arguments) that can be referenced in reports.
+- **Legal Difficulty Analysis**: Identifies legal gray areas and frontier issues. Cites legal maxims and principles (e.g., "no one should profit from wrongdoing"). Analyzes social ethics and public order considerations. Provides innovation space without violating existing legal provisions.
 - **Civil & Commercial Specialized Standards**: Built-in legal basis for civil/commercial judicial documents, mandatory hearing procedure items, and legal citation format standards.
 - **Cross-Consistency Check**: Automatically detects logical conflicts between dimension scores (e.g., high "Clear Facts" but low "Sufficient Evidence").
 - **Token Budget Estimation**: Estimates token consumption before rendering prompts, preventing context overflow.
@@ -104,7 +108,7 @@ For anomaly detection integration, also configure:
 
 ## Usage
 
-### Tool List (17 MCP Tools)
+### Tool List (21 MCP Tools)
 
 | Tool | Description | Token Cost |
 |:---|:---|:---|
@@ -125,6 +129,10 @@ For anomaly detection integration, also configure:
 | `trace_evidence_references` | Trace evidence citations | Zero |
 | `detect_evasive_patterns` | Detect evasive writing patterns | Zero |
 | `pipeline_progress` | Query assessment pipeline progress | Zero |
+| `query_law_database` | Query law database, detect priority, conflicts, retroactivity | Zero |
+| `query_case_precedent` | Query case precedent database, detect conflicts and deviations | Zero |
+| `submit_supplementary_doc` | Submit supplementary documents for report referencing | Zero |
+| `analyze_legal_difficulty` | Analyze legal difficulty, legal maxims, public order, innovation space | Zero |
 
 ### Typical Assessment Workflow
 
@@ -138,8 +146,12 @@ For anomaly detection integration, also configure:
 7. detect_evasive_patterns    → Detect evasive patterns
 8. extract_timeline           → Extract timeline
 9. trace_evidence_references  → Trace evidence references
-10. calculate_weighted_score  → Calculate weighted total
-11. generate_report           → Generate assessment report
+10. query_law_database        → Query law database (priority, conflicts, retroactivity)
+11. query_case_precedent      → Query case precedents (conflicts, deviations, innovation)
+12. submit_supplementary_doc  → Submit supplementary documents (optional)
+13. analyze_legal_difficulty  → Analyze legal difficulty (maxims, public order, frontier)
+14. calculate_weighted_score  → Calculate weighted total
+15. generate_report           → Generate assessment report
 ```
 
 ### 7-Dimension Scoring System
@@ -159,7 +171,7 @@ For anomaly detection integration, also configure:
 ```
 judicial-doc-quality-mcp/
 ├── src/judicial_quality_mcp/   # Core source code
-│   ├── server.py               # MCP server (17 tools)
+│   ├── server.py               # MCP server (21 tools)
 │   ├── config.py               # Configuration management
 │   ├── models.py               # Data models
 │   ├── response_parser.py      # Response parser

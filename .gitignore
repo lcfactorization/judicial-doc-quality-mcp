@@ -39,9 +39,21 @@ ENV/
 .coverage
 htmlcov/
 
-# Output
-output/
-reports/
+# Output (use /** to allow negation patterns to work for sub-paths)
+output/**
+reports/**
+graphify-out/**
+
+# Exception: track md2html_batch scripts and docs
+!output/md2html_batch/
+!output/md2html_batch/README.md
+!output/md2html_batch/README-cn.md
+!output/md2html_batch/NOTICE
+!output/md2html_batch/md2html_batch.py
+!output/md2html_batch/docx2html_batch.py
+!output/md2html_batch/md2html.cmd
+!output/md2html_batch/md2html.sh
+!output/md2html_batch/.gitignore
 
 # Sensitive - real case documents and test data
 *.real.md
@@ -53,12 +65,33 @@ test_docs/
 *质量评估报告_苏*
 *综合比对报告_苏*
 *补充文档演示报告_苏*
+*质量评估报告_V12*
+*质量评估报告_TraeGLM51*
 
-# Sensitive - debug/temp scripts with hardcoded paths
+# Sensitive - scripts with hardcoded real case paths/IDs or real names
+scripts/run_v40_assessment.py
+tests/test_report_6271.py
+assess_doc.py
+batch_assess.py
+demo_supplementary_doc.py
+test_e2e_merged.py
+test_full_merged.py
+test_evasive_debug.py
+test_debug_aux.py
+test_auto_detect.py
+test_merged_report.py
+test_new_tools.py
 _check_report.py
+_dryrun_test.py
+_real_test_v12.py
+_verify_real.py
+_fix_table.py
 
 # macOS
 .DS_Store
 
 # Windows
 Thumbs.db
+
+# Mermaid cache (build artifact, downloaded at runtime)
+.mermaid_cache.js

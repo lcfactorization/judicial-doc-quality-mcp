@@ -1,4 +1,4 @@
-"""Configuration management for judicial-doc-quality-mcp v0.1.0"""
+"""Configuration management for judicial-doc-quality-mcp v0.2.0"""
 
 import importlib
 import logging
@@ -383,12 +383,12 @@ class AppConfig(BaseModel):
     def from_env(cls) -> "AppConfig":
         load_dotenv()
         return cls(
-            skills_dir=os.getenv("SKILLS_DIR", str(SKILLS_DIR)),
-            anchors_dir=os.getenv("ANCHORS_DIR", str(ANCHORS_DIR)),
-            verbose=os.getenv("VERBOSE", "false").lower() == "true",
-            anomaly_max_deduction=int(os.getenv("ANOMALY_MAX_DEDUCTION", str(ANOMALY_TOTAL_MAX_DEDUCTION))),
-            innovation_max_bonus=int(os.getenv("INNOVATION_MAX_BONUS", str(INNOVATION_TOTAL_MAX_BONUS))),
-            anomaly_mcp_available=os.getenv("ANOMALY_MCP_AVAILABLE", "false").lower() == "true",
-            rule_engine_enabled=os.getenv("RULE_ENGINE_ENABLED", "true").lower() == "true",
-            evasive_detection_enabled=os.getenv("EVASIVE_DETECTION_ENABLED", "true").lower() == "true",
+            skills_dir=os.getenv("JQ_SKILLS_DIR", os.getenv("SKILLS_DIR", str(SKILLS_DIR))),
+            anchors_dir=os.getenv("JQ_ANCHORS_DIR", os.getenv("ANCHORS_DIR", str(ANCHORS_DIR))),
+            verbose=os.getenv("JQ_VERBOSE", os.getenv("VERBOSE", "false")).lower() == "true",
+            anomaly_max_deduction=int(os.getenv("JQ_ANOMALY_MAX_DEDUCTION", os.getenv("ANOMALY_MAX_DEDUCTION", str(ANOMALY_TOTAL_MAX_DEDUCTION)))),
+            innovation_max_bonus=int(os.getenv("JQ_INNOVATION_MAX_BONUS", os.getenv("INNOVATION_MAX_BONUS", str(INNOVATION_TOTAL_MAX_BONUS)))),
+            anomaly_mcp_available=os.getenv("JQ_ANOMALY_MCP_AVAILABLE", os.getenv("ANOMALY_MCP_AVAILABLE", "false")).lower() == "true",
+            rule_engine_enabled=os.getenv("JQ_RULE_ENGINE_ENABLED", os.getenv("RULE_ENGINE_ENABLED", "true")).lower() == "true",
+            evasive_detection_enabled=os.getenv("JQ_EVASIVE_DETECTION_ENABLED", os.getenv("EVASIVE_DETECTION_ENABLED", "true")).lower() == "true",
         )

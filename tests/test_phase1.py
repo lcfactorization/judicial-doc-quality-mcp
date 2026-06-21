@@ -696,9 +696,9 @@ def test_generate_report():
     assert result["success"]
     assert "report_markdown" in result
     report = result["report_markdown"]
-    assert "裁判文书质量评估报告" in report
-    assert "异常扣分明细" in report
-    assert "创新性加分明细" in report
+    assert "司法/行政文书程序与实体异常深度检测与质量评估报告" in report
+    assert "异常扣分" in report
+    assert "创新" in report and "加分" in report
     print(f"  Report length: {len(report)} chars")
     print(f"  Report preview (first 300 chars):\n{report[:300]}...")
 

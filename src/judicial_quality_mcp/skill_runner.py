@@ -329,6 +329,14 @@ def build_system_prompt(meta: SkillMeta, trial_stage: str = "") -> str:
         parts.append("- 交叉校验联动：评分完成后，将expectation_gap.overall_ratio作为claim_support_overall_ratio、命中CS-B02/CS-B03时将编号作为claim_support_hit_codes、审级作为trial_stage传入cross_check_consistency，触发R11/R12规则")
         parts.append("")
 
+    parts.append("## 红旗提名纪律（Red-Flag Nomination Discipline）")
+    parts.append("加权综合分会稀释致命信号（如遗漏诉请该发回重审的判决可能拿B+）。你可在输出JSON的可选字段 red_flag_candidates 中提名红旗候选：")
+    parts.append("- 仅当发现可能导致改判/发回重审/撤销/变更裁判结果的强信号时才提名，宁缺毋滥")
+    parts.append("- 每项提名必须包含：item（红旗事项）、quote（原文引用）、reason（提名理由）、suggested_level（建议级别：veto=一票否决级/warning=预警级）")
+    parts.append("- 提名不直接改变评分：最终是否触发红旗封顶由规则层（RED_FLAG_RULES/ADMIN_RED_FLAG_RULES）确定性裁决")
+    parts.append("- 禁止将一般性瑕疵提名为红旗：一般瑕疵一律走正常 deduction_items 扣分通道")
+    parts.append("")
+
     parts.append("## 负面清单（一票否决项）")
     parts.append("以下情形一旦确认，该维度评分直接降为0分：")
     for vcode, vinfo in NEGATIVE_LIST.items():

@@ -28,16 +28,20 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .config import (
+    ADMIN_DOC_TITLE_PATTERN,
     ANOMALY_DEDUCTION,
     ANOMALY_MCP_CONFIG,
     ANOMALY_TOTAL_MAX_DEDUCTION,
     CROSS_CHECK_RULES,
     DIMENSION_ORDER,
     DIMENSION_TITLES,
+    DOCUMENT_TYPE_ADMINISTRATIVE,
+    DOCUMENT_TYPE_JUDGMENT,
     ErrorCode,
     EVASIVE_PATTERNS,
     INNOVATION_BONUS,
     INNOVATION_TOTAL_MAX_BONUS,
+    JUDGMENT_DOC_TITLE_PATTERN,
     QUALITY_DIMENSIONS,
     QUALITY_GRADES,
     QUALITY_WEIGHTS,
@@ -340,6 +344,9 @@ def calculate_weighted_score(
     scores: dict,
     anomaly_items: list[dict] | None = None,
     innovation_items: list[dict] | None = None,
+    document_type: str = DOCUMENT_TYPE_JUDGMENT,
+    red_flag_inputs: dict | None = None,
+    claim_support_result: dict | None = None,
 ) -> str:
     """计算加权总分并确定等级。纯规则函数，零 Token 消耗。
 
@@ -354,14 +361,25 @@ def calculate_weighted_score(
     innovation_items: 创新性加分项列表，每项含 type, bonus, description。
                       type可选: mediation_success, legal_gap_filling, framework_breakthrough,
                       judicial_logic, complex_dispute_resolution
+    document_type: 文书类型——"judgment"（判决/裁定，默认，适用RED_FLAG_RULES）
+                   | "administrative_decision"（行政决定，适用ADMIN_RED_FLAG_RULES）
+    red_flag_inputs: hallucination/anomaly联动的critical发现（如 H-1无源编造/H-2法条误用/
+                     H-7结果无支撑/A9程序类），结构如 {"findings": [{"code": "H-1",
+                     "severity": "critical", "description": "..."}]}
+    claim_support_result: claim_support 维度解析结果（含 deduction_items/expectation_gap/
+                          discretion_points），供红旗规则确定性提取CS码与支持率
 
     返回 JSON 字符串，包含：
-    - weighted_total: 加权总分（含异常扣分和创新加分调整后）
+    - weighted_total: 加权总分（含异常扣分、创新加分、托底与红旗封顶后的终分）
+    - weighted_raw_score: 封顶前加权原始分
+    - final_score: 终分（=weighted_total）
     - base_weighted_total: 基础加权总分（调整前）
     - anomaly_deduction: 异常扣分总额
     - innovation_bonus: 创新性加分总额
     - grade: 等级（A/B/C/D/F）
     - grade_description: 等级描述
+    - red_flag_level: 红旗最高级别（veto/warning/None）
+    - red_flags: 触发的红旗列表（rule_id/level/name/evidence/claim_ref/consequence/legal_refs）
     - dimension_details: 各维度得分明细
     - anomaly_details: 异常扣分明细
     - innovation_details: 创新性加分明细
@@ -375,7 +393,14 @@ def calculate_weighted_score(
                 int_scores[k] = 0
                 logger.warning("calculate_weighted_score: invalid score for %s: %s, set to 0", k, v)
 
-        result = _parser.calculate_weighted_score(int_scores, anomaly_items, innovation_items)
+        result = _parser.calculate_weighted_score(
+            int_scores,
+            anomaly_items,
+            innovation_items,
+            document_type=document_type,
+            red_flag_inputs=red_flag_inputs,
+            claim_support_result=claim_support_result,
+        )
         return json.dumps({"success": True, **result}, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("calculate_weighted_score: %s", e, exc_info=True)
@@ -741,6 +766,22 @@ def estimate_token_budget(
         return _make_error(ErrorCode.INTERNAL_ERROR, f"Token预算预估异常：{e}", retryable=True)
 
 
+def _infer_document_type(document_meta: dict | None) -> str:
+    """按文书标题/元信息正则自动检测 document_type（generate_report 兜底）。
+
+    含"行政处理决定书|行政处罚决定书|责令改正|复议决定"→ administrative_decision；
+    含"判决书|裁定书"→ judgment；无命中时返回 judgment（默认）。
+    """
+    if not document_meta:
+        return DOCUMENT_TYPE_JUDGMENT
+    text = " ".join(str(v) for v in document_meta.values() if isinstance(v, str))
+    if re.search(ADMIN_DOC_TITLE_PATTERN, text):
+        return DOCUMENT_TYPE_ADMINISTRATIVE
+    if re.search(JUDGMENT_DOC_TITLE_PATTERN, text):
+        return DOCUMENT_TYPE_JUDGMENT
+    return DOCUMENT_TYPE_JUDGMENT
+
+
 @mcp.tool()
 def generate_report(
     dimension_results: list[dict],
@@ -767,6 +808,9 @@ def generate_report(
     report_id: str | None = None,
     minimum_score_applied: bool = False,
     trial_stage: str = "",
+    document_type: str | None = None,
+    red_flags: list[dict] | None = None,
+    weighted_raw_score: float | None = None,
 ) -> str:
     """生成结构化 Markdown 评分报告。纯规则函数，零 Token 消耗。
 
@@ -774,7 +818,7 @@ def generate_report(
     支持 GitHub Alerts 风格（NOTE/TIP/IMPORTANT/WARNING/CAUTION）的 quote block。
 
     dimension_results: 各维度评分结果列表（来自 parse_score_result 的 parsed 字段）
-    weighted_total: 加权总分（来自 calculate_weighted_score）
+    weighted_total: 加权总分（来自 calculate_weighted_score 的 final_score）
     grade: 等级（来自 calculate_weighted_score）
     cross_check: 一致性检查结果（来自 cross_check_consistency，可选）
     anomaly_deduction: 异常扣分总额（来自 calculate_weighted_score）
@@ -796,9 +840,18 @@ def generate_report(
     coupling_analysis: 异常耦合分析结果（来自 ResponseParser.compute_coupling_analysis，可选）
     report_id: 报告编号（如不提供则自动生成，可选）
     minimum_score_applied: 是否适用了底线尊重原则（默认 False）
+    document_type: 文书类型 "judgment"|"administrative_decision"；未显式传入时按文书标题正则
+                   自动检测（含"行政处理决定书|行政处罚决定书|责令改正|复议决定"→行政决定；
+                   "判决书|裁定书"→判决/裁定；默认 judgment）
+    red_flags: 红旗列表（来自 calculate_weighted_score 的 red_flags，可选）——触发时报告顶部
+               渲染红旗 banner（🚩一票否决级/⚠️预警级）
+    weighted_raw_score: 红旗封顶前加权原始分（来自 calculate_weighted_score，可选）——
+                        与红旗并存时终分行展示"加权 X → 终评 Y（红旗封顶）"
 
     返回 JSON 字符串，包含 report_markdown 字段。
     """
+    if document_type is None:
+        document_type = _infer_document_type(document_meta)
     return _report_builder.build_report_markdown(
         dimension_results=dimension_results,
         weighted_total=weighted_total,
@@ -824,6 +877,9 @@ def generate_report(
         report_id=report_id,
         minimum_score_applied=minimum_score_applied,
         trial_stage=trial_stage,
+        document_type=document_type,
+        red_flags=red_flags,
+        weighted_raw_score=weighted_raw_score,
     )
 
 

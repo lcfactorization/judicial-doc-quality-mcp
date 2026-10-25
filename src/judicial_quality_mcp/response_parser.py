@@ -9,13 +9,19 @@ import logging
 import re
 
 from .config import (
+    ADMIN_RED_FLAG_RULES,
     ANOMALY_DEDUCTION,
     ANOMALY_TOTAL_MAX_DEDUCTION,
     DIMENSION_TITLES,
+    DOCUMENT_TYPE_ADMINISTRATIVE,
+    DOCUMENT_TYPE_JUDGMENT,
     INNOVATION_BONUS,
     INNOVATION_TOTAL_MAX_BONUS,
     QUALITY_GRADES,
     QUALITY_WEIGHTS,
+    RED_FLAG_RULES,
+    RED_FLAG_VETO_CAP,
+    RED_FLAG_WARNING_CAP,
 )
 
 logger = logging.getLogger(__name__)
@@ -307,12 +313,23 @@ class ResponseParser:
         anomaly_items: list[dict] | None = None,
         innovation_items: list[dict] | None = None,
         has_favorable_finding: bool = False,
+        document_type: str = DOCUMENT_TYPE_JUDGMENT,
+        red_flag_inputs: dict | None = None,
+        claim_support_result: dict | None = None,
     ) -> dict:
         """Calculate the weighted total score.
 
         has_favorable_finding 默认 False：40 分托底（底线尊重原则）仅在调用方
         显式传入 True 时生效。托底触发时，返回结果中会带 score_floor_applied=True，
         供报告展示与审计。
+
+        红旗预警与一票否决（v0.4.0）：
+        - document_type: "judgment"（默认，RED_FLAG_RULES）| "administrative_decision"（ADMIN_RED_FLAG_RULES）
+        - red_flag_inputs: hallucination/anomaly 联动的 critical 发现（如 H-1/H-2/H-7/A9）
+        - claim_support_result: claim_support 维度解析结果（CS 码、expectation_gap、discretion_points）
+        - 确定性封顶：Veto 级 final=min(加权分,59)、Warning 级 final=min(加权分,74)；
+          红旗封顶优先于 MINIMUM_SCORE 托底（红旗赢）。
+        - 返回增加 weighted_raw_score（封顶前加权分）、final_score（终分）、red_flags[]。
         """
         logger.info(
             "calculate_weighted_score: starting calculation with scores=%s, anomaly_count=%d, innovation_count=%d, has_favorable=%s",
@@ -446,6 +463,7 @@ class ResponseParser:
 
         adjusted_total = base_total - anomaly_deduction + innovation_bonus
         adjusted_total = max(0, min(100, round(adjusted_total, 1)))
+        weighted_raw_score = adjusted_total
 
         score_floor_applied = False
         if has_favorable_finding and adjusted_total < MINIMUM_SCORE:
@@ -456,26 +474,125 @@ class ResponseParser:
             adjusted_total = MINIMUM_SCORE
             score_floor_applied = True
 
+        # ── 红旗预警与一票否决（确定性封顶，规则层裁决）──
+        red_flags = self._evaluate_red_flags(
+            document_type=document_type,
+            dimension_scores=dimension_scores,
+            claim_support_result=claim_support_result,
+            red_flag_inputs=red_flag_inputs,
+        )
+        final_score = adjusted_total
+        for flag in red_flags:
+            cap = RED_FLAG_VETO_CAP if flag["level"] == "veto" else RED_FLAG_WARNING_CAP
+            final_score = min(final_score, cap)
+        red_flag_worst = None
+        if red_flags:
+            red_flag_worst = "veto" if any(f["level"] == "veto" for f in red_flags) else "warning"
+            logger.warning(
+                "calculate_weighted_score: red-flag cap applied, raw=%.1f, final=%.1f, flags=%s",
+                weighted_raw_score, final_score, [f["rule_id"] for f in red_flags],
+            )
+        adjusted_total = final_score
+
         grade, grade_desc = self._determine_grade(adjusted_total)
 
         logger.info(
-            "calculate_weighted_score: final total=%.1f (base=%.1f - anomaly=%.0f + innovation=%d), grade=%s, grade_desc=%s, floor_applied=%s",
-            adjusted_total, base_total, anomaly_deduction, innovation_bonus, grade, grade_desc, score_floor_applied,
+            "calculate_weighted_score: final total=%.1f (base=%.1f - anomaly=%.0f + innovation=%d), grade=%s, grade_desc=%s, floor_applied=%s, red_flags=%d",
+            adjusted_total, base_total, anomaly_deduction, innovation_bonus, grade, grade_desc,
+            score_floor_applied, len(red_flags),
         )
 
         return {
             "weighted_total": adjusted_total,
+            "weighted_raw_score": weighted_raw_score,
+            "final_score": adjusted_total,
             "base_weighted_total": base_total,
             "anomaly_deduction": anomaly_deduction,
             "innovation_bonus": innovation_bonus,
             "grade": grade,
             "grade_description": grade_desc,
+            "red_flag_level": red_flag_worst,
+            "red_flags": red_flags,
             "dimension_details": details,
             "anomaly_details": anomaly_details,
             "innovation_details": innovation_details,
             "score_floor_applied": score_floor_applied,
             "minimum_score_applied": score_floor_applied,
         }
+
+    @staticmethod
+    def _evaluate_red_flags(
+        document_type: str,
+        dimension_scores: dict,
+        claim_support_result: dict | None,
+        red_flag_inputs: dict | None,
+    ) -> list[dict]:
+        """Deterministically evaluate red-flag rules. LLM 只提名，规则层裁决。
+
+        Returns list of fired flags sorted veto-first; each flag:
+        {rule_id, level, name, evidence, claim_ref, consequence, legal_refs}
+        """
+        from .config import (
+            _rf_cs_claims,
+            _rf_cs_counts,
+            _rf_cs_evidence,
+            _rf_findings,
+        )
+
+        if document_type == DOCUMENT_TYPE_ADMINISTRATIVE:
+            rules = ADMIN_RED_FLAG_RULES
+        else:
+            # 判决/裁定模式（默认），未知 document_type 也按判决模式兜底
+            rules = RED_FLAG_RULES
+
+        ctx = {
+            "scores": dimension_scores or {},
+            "claim_support": claim_support_result or {},
+            "red_flag_inputs": red_flag_inputs or {},
+        }
+        cs_counts = _rf_cs_counts(ctx["claim_support"])
+        findings = _rf_findings(ctx["red_flag_inputs"])
+
+        fired: list[dict] = []
+        for rule in rules:
+            try:
+                if not rule["check"](ctx):
+                    continue
+            except Exception as e:
+                logger.warning("_evaluate_red_flags: rule %s error: %s", rule.get("id"), e)
+                continue
+
+            evidence = ""
+            claim_ref = ""
+            cs_code = rule.get("cs_code")
+            if cs_code:
+                evidence = _rf_cs_evidence(ctx["claim_support"], cs_code)
+                claim_ref = "、".join(_rf_cs_claims(ctx["claim_support"], cs_code))
+            elif findings:
+                evidence = "；".join(
+                    str(f.get("description", f.get("code", "")))[:80] for f in findings[:3]
+                )
+            elif rule["id"] in ("AV1", "AV2"):
+                dim = "sufficient_evidence" if rule["id"] == "AV1" else "correct_law_application"
+                evidence = f"{DIMENSION_TITLES.get(dim, dim)}得分 {ctx['scores'].get(dim, 'N/A')}（低于阈值60）"
+
+            fired.append({
+                "rule_id": rule["id"],
+                "level": rule["level"],
+                "name": rule.get("name", ""),
+                "evidence": evidence,
+                "claim_ref": claim_ref,
+                "consequence": rule.get("consequence", ""),
+                "legal_refs": list(rule.get("legal_refs", [])),
+            })
+            logger.info(
+                "_evaluate_red_flags: FIRED %s (%s) cs_counts=%s findings=%d",
+                rule["id"], rule["level"], cs_counts, len(findings),
+            )
+
+        # veto 优先展示
+        fired.sort(key=lambda f: 0 if f["level"] == "veto" else 1)
+        return fired
 
     @staticmethod
     def _determine_grade(total: float) -> tuple[str, str]:

@@ -19,6 +19,8 @@ from .config import (
     INNOVATION_BONUS,
     QUALITY_GRADES,
     QUALITY_WEIGHTS,
+    RED_FLAG_VETO_CAP,
+    RED_FLAG_WARNING_CAP,
     ErrorCode,
     StructuredError,
 )
@@ -157,6 +159,9 @@ def build_report_markdown(
     report_id: str | None = None,
     minimum_score_applied: bool = False,
     trial_stage: str = "",
+    document_type: str | None = None,
+    red_flags: list[dict] | None = None,
+    weighted_raw_score: float | None = None,
 ) -> str:
     """Build the full Markdown report. Returns JSON string with report_markdown field.
 
@@ -171,6 +176,30 @@ def build_report_markdown(
 
         lines.append("# 司法/行政文书程序与实体异常深度检测与质量评估报告\n")
         lines.append(f"> 报告编号：{report_id}\n")
+
+        # ── 红旗 banner（报告最顶部：🚩一票否决级 / ⚠️预警级）──
+        red_flags = [f for f in (red_flags or []) if isinstance(f, dict)]
+        has_veto_flag = any(f.get("level") == "veto" for f in red_flags)
+        if red_flags:
+            n_veto = sum(1 for f in red_flags if f.get("level") == "veto")
+            n_warn = len(red_flags) - n_veto
+            lines.append("> [!Danger]" if has_veto_flag else "> [!Warning]")
+            lines.append(f"> **🚩 红旗预警与一票否决：共 {len(red_flags)} 条（一票否决 {n_veto} / 预警 {n_warn}）**")
+            lines.append(">")
+            for f in red_flags:
+                icon = "🚩" if f.get("level") == "veto" else "⚠️"
+                level_zh = "一票否决" if f.get("level") == "veto" else "预警"
+                lines.append(f"> **{icon} {f.get('rule_id', 'RF-?')}（{level_zh}级）{f.get('name', '')}**")
+                if f.get("evidence"):
+                    lines.append(f"> - 证据摘录：{f['evidence']}")
+                if f.get("claim_ref"):
+                    lines.append(f"> - 关联诉请：{f['claim_ref']}")
+                if f.get("consequence"):
+                    lines.append(f"> - 后果：{f['consequence']}")
+                if f.get("legal_refs"):
+                    lines.append(f"> - 法条依据：{'；'.join(f['legal_refs'])}")
+            lines.append(f"> 封顶规则：一票否决级 → 终分=min(加权分,{RED_FLAG_VETO_CAP})；预警级 → 终分=min(加权分,{RED_FLAG_WARNING_CAP})")
+            lines.append("")
 
         if document_meta:
             _META_KEY_ZH = {
@@ -263,7 +292,12 @@ def build_report_markdown(
 
         # ── 综合评级 ──
         lines.append("## 综合评级\n")
-        lines.append(f'<span class="grade-tag grade-{grade[0]}">{grade}</span>（{grade_desc}）  |  加权总分 **{weighted_total}** / 100  |  等级区间 [{grade_lo}, {grade_hi}]  |  异常等级 **{anomaly_level}**\n')
+        if red_flags:
+            grade_label = "F（红旗）" if has_veto_flag else "C+（预警）"
+            raw_display = weighted_raw_score if weighted_raw_score is not None else weighted_total
+            lines.append(f'<span class="grade-tag grade-{grade[0]}">{grade_label}</span>  |  加权 **{raw_display:g}** → 终评 **{weighted_total:g}**（红旗封顶）  |  异常等级 **{anomaly_level}**\n')
+        else:
+            lines.append(f'<span class="grade-tag grade-{grade[0]}">{grade}</span>（{grade_desc}）  |  加权总分 **{weighted_total}** / 100  |  等级区间 [{grade_lo}, {grade_hi}]  |  异常等级 **{anomaly_level}**\n')
 
         if anomaly_deduction > 0 or innovation_bonus > 0:
             base = weighted_total - innovation_bonus + anomaly_deduction
@@ -284,6 +318,12 @@ def build_report_markdown(
         overview_rows = []
         overview_rows.append(("检测流程", "异常检测 → 质量评估"))
         overview_rows.append(("审级", trial_stage or "未知"))
+        if document_type:
+            _DOC_TYPE_ZH = {
+                "judgment": "判决/裁定（红旗规则：RF系列）",
+                "administrative_decision": "行政决定（红旗规则：AV系列）",
+            }
+            overview_rows.append(("文书类型", _DOC_TYPE_ZH.get(document_type, document_type)))
         if trial_stage:
             _STAGE_RESPONSIBILITY2 = {
                 "一审": "一审法院对事实认定和法律适用负全部责任",

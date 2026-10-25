@@ -25,7 +25,7 @@ judicial-doc-quality-mcp 是一个面向司法/行政文书质量评估的 MCP �
 
 - **问题**：目录使用原始标题文本（含中文序号和标点）作为 href，Markdown 渲染器无法正确解析
 - **修复**：新增 `_slugify()` 函数，将标题规范化为合法锚点（去除标点、空格转连字符），目录 href 与标题锚点一致
-- **文件**：[report_builder.py](file:///C:/Users/stere/Documents/Obsidian%20Vault/judicial-doc-quality-mcp/src/judicial_quality_mcp/report_builder.py)
+- **文件**：[report_builder.py](src/judicial_quality_mcp/report_builder.py)
 
 ### 3.2 章节序号错乱
 

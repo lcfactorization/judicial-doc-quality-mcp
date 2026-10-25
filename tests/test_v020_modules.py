@@ -555,7 +555,7 @@ class TestPromptBuilder:
         assert infer_trial_stage("(2023)苏0602民初1234号") == "一审"
 
     def test_infer_trial_stage_ershen(self):
-        assert infer_trial_stage("(2024)苏06民终6271号") == "二审"
+        assert infer_trial_stage("(2024)苏06民终9101号") == "二审"
 
     def test_infer_trial_stage_zaishen(self):
         assert infer_trial_stage("(2024)苏06民再1号") == "再审"

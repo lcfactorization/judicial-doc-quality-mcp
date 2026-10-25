@@ -70,7 +70,7 @@ test_docs/
 
 # Sensitive - scripts with hardcoded real case paths/IDs or real names
 scripts/run_v40_assessment.py
-tests/test_report_6271.py
+tests/test_report_local.py
 assess_doc.py
 batch_assess.py
 demo_supplementary_doc.py

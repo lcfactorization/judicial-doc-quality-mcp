@@ -93,7 +93,7 @@ for match in matches:
 | L3-1 | **设计 5 条新规则的正则模式**：基于真实判决书样本调优，确保误报率 < 10% | `rule_engine.py` | 2h |
 | L3-2 | **添加新规则到 EVASIVE_PATTERNS**：包含 pattern/rule_type/severity/message/exceptions/requires_absent | `rule_engine.py` | 1h |
 | L3-3 | **编写单规则测试**：每条规则至少 3 个正向用例 + 2 个反向用例 + 1 个边界用例 | `tests/test_v020_modules.py` | 3h |
-| L3-4 | **集成测试**：使用 (2025)苏06民终6271号 判决书验证新规则触发情况 | `tests/` | 1h |
+| L3-4 | **集成测试**：使用某二审判决书（（20XX）X民终XXXX号）验证新规则触发情况 | `tests/` | 1h |
 | L3-5 | **调优与迭代**：根据集成测试结果调整正则模式和阈值 | `rule_engine.py` | 2h |
 | L3-6 | **文档更新**：更新规则说明和示例 | `rule_engine.py` | 0.5h |
 

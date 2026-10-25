@@ -1,4 +1,4 @@
-"""Report builder v0.2.0 — Markdown and HTML report generation.
+"""Report builder v0.4.0 — Markdown and HTML report generation.
 
 Extracted from server.py's `generate_report` and `generate_html_report` tools.
 Contains the full report template rendering logic (~1200 lines of string
@@ -24,6 +24,15 @@ from .config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ── Dynamic quality-dimension summary (dimension count never goes stale) ──
+_N_QUALITY_DIMS = len(QUALITY_WEIGHTS)
+_QUALITY_DIM_NAMES_ZH = "、".join(DIMENSION_TITLES.get(d, d) for d in QUALITY_WEIGHTS)
+_DIM_COUNT_ZH_NUM = {
+    1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六",
+    7: "七", 8: "八", 9: "九", 10: "十",
+}
+_DIM_COUNT_ZH = _DIM_COUNT_ZH_NUM.get(_N_QUALITY_DIMS, str(_N_QUALITY_DIMS))
 
 # ── Chinese labels used in reports ─────────────────────────────
 
@@ -58,6 +67,47 @@ _DIMENSION_ZH = {
     "case_deviation": "类案偏离",
     "coupling": "惯性耦合",
 }
+
+
+def _find_claim_support_data(dimension_results: list[dict] | None) -> dict | None:
+    """Extract claim_support structured data (claim_ledger etc.) from dimension results.
+
+    The claim_support dimension result may arrive in several shapes depending on
+    the caller: the parsed dict at the top level, or nested under "parsed".
+    Returns the dict containing claim_ledger/discretion_points/expectation_gap,
+    or None if absent.
+    """
+    for dr in dimension_results or []:
+        if not isinstance(dr, dict) or dr.get("dimension") != "claim_support":
+            continue
+        for candidate in (dr, dr.get("parsed"), dr.get("parsed_score")):
+            if isinstance(candidate, dict) and (
+                candidate.get("claim_ledger")
+                or candidate.get("discretion_points")
+                or candidate.get("expectation_gap")
+            ):
+                return candidate
+    return None
+
+
+def _fmt_amount(value) -> str:
+    """Format a monetary amount for report tables; None/non-numeric → '—'."""
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value):,.2f}".rstrip("0").rstrip(".")
+    except (ValueError, TypeError):
+        return str(value)
+
+
+def _fmt_ratio(value) -> str:
+    """Format a support ratio (0-1) as a percentage; None/non-numeric → '—'."""
+    if value is None:
+        return "—"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except (ValueError, TypeError):
+        return str(value)
 
 
 def _slugify(text: str) -> str:
@@ -196,7 +246,7 @@ def build_report_markdown(
         lines.append("> [!Danger]")
         lines.append(f"> **综合异常等级：{anomaly_level}**")
         lines.append(">")
-        lines.append(f"> **评级理由**：本案文书在七维质量评分中加权总分 **{weighted_total}** 分（{grade}·{grade_desc}），"
+        lines.append(f"> **评级理由**：本案文书在{_DIM_COUNT_ZH}维质量评分中加权总分 **{weighted_total}** 分（{grade}·{grade_desc}），"
                      f"等级区间 [{grade_lo}, {grade_hi}]。"
                      f"检出 {total_anomaly_items} 项需关注异常（🔴高 {high_anomaly_count} 项、🟡中 {medium_anomaly_count} 项），"
                      f"异常扣分 −{anomaly_deduction:.0f}，创新加分 +{innovation_bonus:.0f}。")
@@ -229,7 +279,7 @@ def build_report_markdown(
         # ── 报告概览 ──
         lines.append("## 报告概览\n")
         lines.append("> [!Note]")
-        lines.append("> **检测流程**：先进行十六维度异常检测，再进行七维质量评估，两项结果合并参考。\n")
+        lines.append(f"> **检测流程**：先进行十六维度异常检测，再进行{_DIM_COUNT_ZH}维质量评估，两项结果合并参考。\n")
 
         overview_rows = []
         overview_rows.append(("检测流程", "异常检测 → 质量评估"))
@@ -267,9 +317,9 @@ def build_report_markdown(
 
         # ── 各维度评分 ──
         _QUALITY_START = len(lines)
-        lines.append("## __NUM__七维质量评分详情\n")
+        lines.append(f"## __NUM__{_DIM_COUNT_ZH}维质量评分详情\n")
         lines.append("> [!Note]")
-        lines.append("> 七维质量评分体系涵盖形式规范、事实清楚、证据充分、法律适用、说理透彻、实质解纷、语言精练七个维度，")
+        lines.append(f"> {_DIM_COUNT_ZH}维质量评分体系涵盖{_QUALITY_DIM_NAMES_ZH}{_N_QUALITY_DIMS}个维度，")
         lines.append("> 每个维度均包含扣分项、加分项和改进建议，为文书质量提供全面量化评价。\n")
 
         lines.append("### 各维度评分总览\n")
@@ -310,6 +360,7 @@ def build_report_markdown(
             "thorough_reasoning": "增强说理的逻辑性和充分性",
             "substantive_resolution": "提升纠纷实质性化解效果",
             "concise_language": "精简文书语言，避免冗余",
+            "claim_support": "逐项回应诉请并披露支持度算式，强化裁量说理与预期管理",
         }
         _DIM_DETAIL_DESC = {
             "formal_specification": "文书格式规范、要素齐全、结构完整",
@@ -319,6 +370,7 @@ def build_report_markdown(
             "thorough_reasoning": "裁判说理充分、逻辑严密、回应争议焦点",
             "substantive_resolution": "纠纷实质性化解、服判息诉效果好",
             "concise_language": "语言精练、表述准确、无冗余",
+            "claim_support": "当事人预期与诉请支持度：台账完整、逐项回应、算式透明、裁量合理",
         }
         _PLACEHOLDER_REASONS = {"", "—", "无", "略", "同上", "见上文", "详见上文", "符合扣分条件"}
 
@@ -675,6 +727,74 @@ def build_report_markdown(
                     lines.append(f"| {ekey} | {eval_} | 待LLM补充分析 |")
             lines.append("")
 
+        # ── Claim support: 诉请台账表 + 裁量点评级表（claim_support 维度） ──
+        claim_support_data = _find_claim_support_data(dimension_results)
+        if claim_support_data:
+            lines.append("### 诉请台账与支持度核算\n")
+            lines.append("> [!Note]")
+            lines.append("> 当事人预期与诉请支持度维度要求逐项核算当事人诉讼预期与判决支持度的落差。")
+            lines.append("> 下表为诉请台账（claim_ledger），每项诉请均标注裁判处理方式与支持比例。\n")
+
+            claim_ledger = claim_support_data.get("claim_ledger") or []
+            if claim_ledger:
+                lines.append("#### 诉请台账表\n")
+                lines.append("| 诉请编号 | 类型 | 事项 | 请求金额(元) | 判付金额(元) | 支持比例 | 处理结果 | 说理质量 |")
+                lines.append("|:---:|:---:|:---|:---:|:---:|:---:|:---:|:---|")
+                for cl in claim_ledger:
+                    if not isinstance(cl, dict):
+                        continue
+                    c_id = cl.get("claim_id", "—")
+                    c_type = cl.get("type", "—")
+                    c_subject = str(cl.get("subject", "—"))
+                    c_claimed = _fmt_amount(cl.get("claimed_amount"))
+                    c_awarded = _fmt_amount(cl.get("awarded_amount"))
+                    c_ratio = _fmt_ratio(cl.get("support_ratio"))
+                    c_disp = cl.get("disposition", "—")
+                    c_rq = cl.get("reasoning_quality", "—")
+                    lines.append(f"| {c_id} | {c_type} | {c_subject} | {c_claimed} | {c_awarded} | {c_ratio} | {c_disp} | {c_rq} |")
+                lines.append("")
+
+            expectation_gap = claim_support_data.get("expectation_gap") or {}
+            if expectation_gap:
+                lines.append("#### 预期落差核算\n")
+                lines.append("| 指标 | 结果 |")
+                lines.append("|:---|:---|")
+                lines.append(f"| 金额类诉请总额 | {_fmt_amount(expectation_gap.get('performance_claims_total'))} 元 |")
+                lines.append(f"| 判付总额 | {_fmt_amount(expectation_gap.get('awarded_total'))} 元 |")
+                lines.append(f"| 总体支持率 | {_fmt_ratio(expectation_gap.get('overall_ratio'))} |")
+                high_gap = expectation_gap.get("high_gap_claims") or []
+                lines.append(f"| 高落差诉请 | {'、'.join(str(c) for c in high_gap) if high_gap else '无'} |")
+                lines.append("")
+
+            litigation_followup = claim_support_data.get("litigation_followup") or {}
+            if litigation_followup:
+                internal_sig = litigation_followup.get("internal_signals", "")
+                external_q = litigation_followup.get("external_query", "")
+                if internal_sig or external_q:
+                    lines.append("> [!Info]")
+                    lines.append(f"> **衍生诉讼信号（文书内）**：{internal_sig or '未见'}")
+                    if external_q:
+                        lines.append(f"> **外部查询（后续诉讼）**：{external_q}")
+                    lines.append("")
+
+            discretion_points = claim_support_data.get("discretion_points") or []
+            if discretion_points:
+                lines.append("#### 裁量点评级表\n")
+                lines.append("> [!Note]")
+                lines.append("> 裁量四要素审查：裁量事项、法律依据、考量因素披露、对方抗辩回应，综合评级为 充分/部分充分/不充分。\n")
+                lines.append("| 裁量事项 | 引用法律依据 | 披露的考量因素 | 对方抗辩回应 | 综合评级 |")
+                lines.append("|:---|:---|:---|:---|:---:|")
+                for dp in discretion_points:
+                    if not isinstance(dp, dict):
+                        continue
+                    d_issue = dp.get("issue", "—")
+                    d_basis = dp.get("legal_basis_cited", "—")
+                    d_factors = dp.get("factors_disclosed", "—")
+                    d_adversarial = dp.get("adversarial_response", "—")
+                    d_grade = dp.get("grade", "—")
+                    lines.append(f"| {d_issue} | {d_basis} | {d_factors} | {d_adversarial} | {d_grade} |")
+                lines.append("")
+
         # ── Timeline ──
         if timeline_result:
             coverage = timeline_result.get("coverage", {})
@@ -798,7 +918,7 @@ def build_report_markdown(
             lines.append("> 以下异常检测结果来自 **judicial-doc-anomaly-mcp**（[GitHub](https://github.com/lcfactorization/judicial-doc-anomaly-mcp)）的16维检测体系（20260516版），")
             lines.append("> 覆盖程序操作、证据采信、事实认定、焦点偏移、法律适用、自由裁量、修辞技巧、逻辑闭环、")
             lines.append("> 时间一致性、审理过程、外部干预、执行问题、缺失信息、语义漂移、类案偏离、惯性耦合等16个维度。")
-            lines.append("> 检测结果已自动纳入本报告的异常扣分计算，与七维质量评分体系形成互补。\n")
+            lines.append(f"> 检测结果已自动纳入本报告的异常扣分计算，与{_DIM_COUNT_ZH}维质量评分体系形成互补。\n")
 
             risk_summary = {}
             total_anomalies = 0
@@ -911,7 +1031,7 @@ def build_report_markdown(
         lines.append("> **综合评价**\n")
 
         summary_items = []
-        summary_items.append(f"本案文书经十六维度异常检测和七维质量评估，综合评级为 **{grade}（{grade_desc}）**，加权总分 **{weighted_total}** 分。")
+        summary_items.append(f"本案文书经十六维度异常检测和{_DIM_COUNT_ZH}维质量评估，综合评级为 **{grade}（{grade_desc}）**，加权总分 **{weighted_total}** 分。")
 
         if anomaly_details:
             high_ct = sum(1 for a in anomaly_details if a.get("severity") == "high")
@@ -991,7 +1111,7 @@ def build_report_markdown(
         # ── Disclaimer ──
         lines.append("---\n")
         lines.append("> [!Important]")
-        lines.append("> **免责声明**：本报告由 **judicial-doc-quality-mcp** 辅助生成，基于七维评分体系和十六维度异常检测的自动化分析。")
+        lines.append(f"> **免责声明**：本报告由 **judicial-doc-quality-mcp** 辅助生成，基于{_DIM_COUNT_ZH}维评分体系和十六维度异常检测的自动化分析。")
         lines.append("> 异常检测部分由 **judicial-doc-anomaly-mcp** 提供（当该工具可用时自动调用）。")
         lines.append("> 评估结果仅供参考，不构成法律意见。裁判文书的质量评价涉及复杂的法律判断，")
         lines.append("> 本报告不能替代专业法律人士的审查。\n")

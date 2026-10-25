@@ -1,4 +1,4 @@
-"""Configuration management for judicial-doc-quality-mcp v0.2.0"""
+"""Configuration management for judicial-doc-quality-mcp v0.4.0"""
 
 import importlib
 import logging
@@ -40,16 +40,18 @@ QUALITY_DIMENSIONS = [
     "thorough_reasoning",
     "substantive_resolution",
     "concise_language",
+    "claim_support",
 ]
 
 QUALITY_WEIGHTS = {
     "formal_specification": 0.03,
-    "clear_facts": 0.12,
-    "sufficient_evidence": 0.12,
-    "correct_law_application": 0.18,
-    "thorough_reasoning": 0.22,
-    "substantive_resolution": 0.25,
-    "concise_language": 0.08,
+    "clear_facts": 0.10,
+    "sufficient_evidence": 0.10,
+    "correct_law_application": 0.15,
+    "thorough_reasoning": 0.20,
+    "substantive_resolution": 0.22,
+    "concise_language": 0.05,
+    "claim_support": 0.15,
 }
 
 QUALITY_FULL_SCORES = {dim: 100 for dim in QUALITY_DIMENSIONS}
@@ -73,6 +75,7 @@ DIMENSION_TITLES = {
     "thorough_reasoning": "说理充分透彻",
     "substantive_resolution": "实质解纷效果",
     "concise_language": "语言精练流畅",
+    "claim_support": "当事人预期与诉请支持度",
 }
 
 DIMENSION_ORDER = {
@@ -83,6 +86,7 @@ DIMENSION_ORDER = {
     "thorough_reasoning": 5,
     "substantive_resolution": 6,
     "concise_language": 7,
+    "claim_support": 8,
 }
 
 ANOMALY_DEDUCTION = {
@@ -357,6 +361,32 @@ CROSS_CHECK_RULES = [
         "check": lambda s: s.get("substantive_resolution", 0) >= 85 and s.get("thorough_reasoning", 0) >= 80 and s.get("correct_law_application", 0) < 60,
         "message": "实质解纷和说理均高但法律适用低，若存在创新性加分，需核实法律适用创新是否真正成立，建议仲裁重评。",
         "conflict_dims": ["substantive_resolution", "thorough_reasoning", "correct_law_application"],
+    },
+    {
+        # R11 依赖 claim_support 维度解析结果中的 expectation_gap.overall_ratio。
+        # 调用方应将 overall_ratio 以键 "claim_support_overall_ratio" 传入
+        # cross_check_consistency（浮点，0-1）；缺省 1.0 表示无数据、不触发。
+        "id": "R11",
+        "name": "诉请支持率极低且说理不足",
+        "check": lambda s: (
+            float(s.get("claim_support_overall_ratio", 1.0)) < 0.3
+            and s.get("thorough_reasoning", 0) < 70
+        ),
+        "message": "诉请总体支持率极低(<30%)且说理得分不足(<70)，当事人预期与裁判结果落差大：建议强化说理/判后答疑，降低上诉申诉风险。",
+        "conflict_dims": ["claim_support", "thorough_reasoning"],
+    },
+    {
+        # R12 依赖 claim_support 维度解析结果中的扣分编号（CS-B02/CS-B03）与审级。
+        # 调用方应将命中编号（如 "CS-B02,CS-B03"）以键 "claim_support_hit_codes" 传入，
+        # 并将审级以键 "trial_stage" 传入；缺省不触发。
+        "id": "R12",
+        "name": "二审遗漏诉讼请求程序风险",
+        "check": lambda s: (
+            s.get("trial_stage", "") == "二审"
+            and any(code in str(s.get("claim_support_hit_codes", "")) for code in ("CS-B02", "CS-B03"))
+        ),
+        "message": "遗漏诉讼请求程序风险提示（参照民事诉讼法及司法解释对遗漏诉请二审处理的规定）：二审对诉请零回应或对变更/增加诉请未审理且无程序处理，存在漏审程序违法风险，建议核查是否应当发回重审或一并审理。",
+        "conflict_dims": ["claim_support"],
     },
 ]
 

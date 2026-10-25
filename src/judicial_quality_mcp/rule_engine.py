@@ -345,11 +345,18 @@ def cross_check_consistency(int_scores: dict) -> dict:
 
     score_summary = {}
     for dim_key, score_val in int_scores.items():
+        weight = QUALITY_WEIGHTS.get(dim_key, 0.0)
+        # v0.4.0: scores 字典可携带非数值辅助键（如 claim_support_overall_ratio、
+        # trial_stage、claim_support_hit_codes），这些键不参与加权计算
+        if isinstance(score_val, (int, float)) and not isinstance(score_val, bool):
+            weighted = round(score_val * weight, 2)
+        else:
+            weighted = None
         score_summary[dim_key] = {
             "score": score_val,
             "title": DIMENSION_TITLES.get(dim_key, dim_key),
-            "weight": QUALITY_WEIGHTS.get(dim_key, 0.0),
-            "weighted": round(score_val * QUALITY_WEIGHTS.get(dim_key, 0.0), 2),
+            "weight": weight,
+            "weighted": weighted,
         }
 
     result = {

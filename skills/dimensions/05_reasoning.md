@@ -4,7 +4,7 @@ title: 说理充分透彻
 type: dimension
 layer: substance
 order: 5
-weight: 0.22
+weight: 0.20
 full_score: 100
 output_format: dimension_score
 ---

@@ -4,7 +4,7 @@ title: 实质解纷效果
 type: dimension
 layer: substance
 order: 6
-weight: 0.25
+weight: 0.22
 full_score: 100
 output_format: dimension_score
 ---

@@ -1,4 +1,4 @@
-"""Skill Loader & Template Renderer v0.2.0 — loads Skill .md files, renders templates.
+"""Skill Loader & Template Renderer v0.4.0 — loads Skill .md files, renders templates.
 
 Bridge Architecture: NO LLM calls.
 This module only provides SkillLoader (file I/O) and TemplateRenderer (variable substitution).
@@ -316,6 +316,17 @@ def build_system_prompt(meta: SkillMeta, trial_stage: str = "") -> str:
         parts.append("- 学理：学术理论的引用和运用")
         parts.append("- 情理：人情事理的考量")
         parts.append("- 文理：文书结构和语言表达")
+        parts.append("")
+
+    if meta.name == "claim_support":
+        parts.append("## 诉请支持度分析框架（五步法）")
+        parts.append("本维度采用'台账—对齐—算账—裁量—预期'五步分析框架：")
+        parts.append("- 第一步 台账：从起诉状/上诉状中逐项提取诉讼请求，建立claim_ledger台账（claim_id/type/subject/claimed_amount/awarded_amount/support_ratio/disposition/reasoning_quality）")
+        parts.append("- 第二步 逐项对齐：将每项诉请与'本院认为'说理及判决主文逐项对齐，标记支持/部分支持/驳回/未回应/另案，零回应（CS-B02）和变更/增加诉请未审理（CS-B03）重点排查")
+        parts.append("- 第三步 金额核算：对给付类诉请核算'基数×期间/比例±调整项=判付金额'的算式链条，仅结论无算式的按CS-B04扣分")
+        parts.append("- 第四步 裁量四要素：对每个裁量点按issue/legal_basis_cited/factors_disclosed/adversarial_response/grade四要素审查，登记入discretion_points；结论式驳斥（CS-B05）、未披露考量因素（CS-B06）、未回应抗辩（CS-B07）、口径偏离类案（CS-B08）逐项扣分")
+        parts.append("- 第五步 衍生信号：核算expectation_gap（overall_ratio=awarded_total/performance_claims_total），识别文书内衍生诉讼信号（另案处理、告知另诉等）登记入litigation_followup")
+        parts.append("- 交叉校验联动：评分完成后，将expectation_gap.overall_ratio作为claim_support_overall_ratio、命中CS-B02/CS-B03时将编号作为claim_support_hit_codes、审级作为trial_stage传入cross_check_consistency，触发R11/R12规则")
         parts.append("")
 
     parts.append("## 负面清单（一票否决项）")

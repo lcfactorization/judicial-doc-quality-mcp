@@ -4,7 +4,7 @@ title: 事实清楚
 type: dimension
 layer: substance
 order: 2
-weight: 0.12
+weight: 0.10
 full_score: 100
 output_format: dimension_score
 ---

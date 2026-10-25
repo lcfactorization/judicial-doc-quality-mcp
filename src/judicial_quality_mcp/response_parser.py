@@ -1,4 +1,4 @@
-"""Response parser v0.2.0 — extract structured score results from LLM/Agent responses.
+"""Response parser v0.4.0 — extract structured score results from LLM/Agent responses.
 
 Bridge Architecture: NO LLM calls.
 Pure text parsing and validation logic.
@@ -132,6 +132,21 @@ class ResponseParser:
         if dimension == "substantive_resolution" and "data_completeness" not in json_obj:
             json_obj["data_completeness"] = "partial"
             result["validation"]["warnings"].append("实质解纷维度缺少data_completeness字段，已设为partial")
+
+        if dimension == "claim_support" and "data_completeness" not in json_obj:
+            json_obj["data_completeness"] = "partial"
+            result["validation"]["warnings"].append("诉请支持度维度缺少data_completeness字段，已设为partial")
+
+        if dimension == "claim_support":
+            if "claim_ledger" not in json_obj:
+                json_obj["claim_ledger"] = []
+                result["validation"]["warnings"].append("诉请支持度维度缺少claim_ledger字段，已设为空数组")
+            if "discretion_points" not in json_obj:
+                json_obj["discretion_points"] = []
+                result["validation"]["warnings"].append("诉请支持度维度缺少discretion_points字段，已设为空数组")
+            if "expectation_gap" not in json_obj:
+                json_obj["expectation_gap"] = {}
+                result["validation"]["warnings"].append("诉请支持度维度缺少expectation_gap字段，已设为空对象")
 
         logger.info(
             "parse_score_result: dimension=%s, score=%s, valid=%s, warnings=%d",
@@ -291,8 +306,14 @@ class ResponseParser:
         dimension_scores: dict[str, int],
         anomaly_items: list[dict] | None = None,
         innovation_items: list[dict] | None = None,
-        has_favorable_finding: bool = True,
+        has_favorable_finding: bool = False,
     ) -> dict:
+        """Calculate the weighted total score.
+
+        has_favorable_finding 默认 False：40 分托底（底线尊重原则）仅在调用方
+        显式传入 True 时生效。托底触发时，返回结果中会带 score_floor_applied=True，
+        供报告展示与审计。
+        """
         logger.info(
             "calculate_weighted_score: starting calculation with scores=%s, anomaly_count=%d, innovation_count=%d, has_favorable=%s",
             dimension_scores,
@@ -426,18 +447,20 @@ class ResponseParser:
         adjusted_total = base_total - anomaly_deduction + innovation_bonus
         adjusted_total = max(0, min(100, round(adjusted_total, 1)))
 
+        score_floor_applied = False
         if has_favorable_finding and adjusted_total < MINIMUM_SCORE:
             logger.info(
-                "calculate_weighted_score: applying minimum score floor (%d) due to favorable finding",
+                "calculate_weighted_score: applying minimum score floor (%d) due to explicit favorable finding",
                 MINIMUM_SCORE,
             )
             adjusted_total = MINIMUM_SCORE
+            score_floor_applied = True
 
         grade, grade_desc = self._determine_grade(adjusted_total)
 
         logger.info(
-            "calculate_weighted_score: final total=%.1f (base=%.1f - anomaly=%.0f + innovation=%d), grade=%s, grade_desc=%s",
-            adjusted_total, base_total, anomaly_deduction, innovation_bonus, grade, grade_desc,
+            "calculate_weighted_score: final total=%.1f (base=%.1f - anomaly=%.0f + innovation=%d), grade=%s, grade_desc=%s, floor_applied=%s",
+            adjusted_total, base_total, anomaly_deduction, innovation_bonus, grade, grade_desc, score_floor_applied,
         )
 
         return {
@@ -450,7 +473,8 @@ class ResponseParser:
             "dimension_details": details,
             "anomaly_details": anomaly_details,
             "innovation_details": innovation_details,
-            "minimum_score_applied": has_favorable_finding and (base_total - anomaly_deduction + innovation_bonus) < MINIMUM_SCORE,
+            "score_floor_applied": score_floor_applied,
+            "minimum_score_applied": score_floor_applied,
         }
 
     @staticmethod

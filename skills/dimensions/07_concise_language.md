@@ -4,7 +4,7 @@ title: 语言精练流畅
 type: dimension
 layer: form
 order: 7
-weight: 0.08
+weight: 0.05
 full_score: 100
 output_format: dimension_score
 ---

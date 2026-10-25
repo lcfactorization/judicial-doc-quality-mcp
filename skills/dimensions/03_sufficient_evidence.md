@@ -4,7 +4,7 @@ title: 证据确实充分
 type: dimension
 layer: substance
 order: 3
-weight: 0.12
+weight: 0.10
 full_score: 100
 output_format: dimension_score
 ---

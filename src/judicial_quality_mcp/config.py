@@ -1,8 +1,9 @@
-"""Configuration management for judicial-doc-quality-mcp v0.2.0"""
+"""Configuration management for judicial-doc-quality-mcp v0.4.0"""
 
 import importlib
 import logging
 import os
+import re
 from enum import Enum
 from pathlib import Path
 
@@ -40,16 +41,18 @@ QUALITY_DIMENSIONS = [
     "thorough_reasoning",
     "substantive_resolution",
     "concise_language",
+    "claim_support",
 ]
 
 QUALITY_WEIGHTS = {
     "formal_specification": 0.03,
-    "clear_facts": 0.12,
-    "sufficient_evidence": 0.12,
-    "correct_law_application": 0.18,
-    "thorough_reasoning": 0.22,
-    "substantive_resolution": 0.25,
-    "concise_language": 0.08,
+    "clear_facts": 0.10,
+    "sufficient_evidence": 0.10,
+    "correct_law_application": 0.15,
+    "thorough_reasoning": 0.20,
+    "substantive_resolution": 0.22,
+    "concise_language": 0.05,
+    "claim_support": 0.15,
 }
 
 QUALITY_FULL_SCORES = {dim: 100 for dim in QUALITY_DIMENSIONS}
@@ -73,6 +76,7 @@ DIMENSION_TITLES = {
     "thorough_reasoning": "说理充分透彻",
     "substantive_resolution": "实质解纷效果",
     "concise_language": "语言精练流畅",
+    "claim_support": "当事人预期与诉请支持度",
 }
 
 DIMENSION_ORDER = {
@@ -83,6 +87,7 @@ DIMENSION_ORDER = {
     "thorough_reasoning": 5,
     "substantive_resolution": 6,
     "concise_language": 7,
+    "claim_support": 8,
 }
 
 ANOMALY_DEDUCTION = {
@@ -358,10 +363,318 @@ CROSS_CHECK_RULES = [
         "message": "实质解纷和说理均高但法律适用低，若存在创新性加分，需核实法律适用创新是否真正成立，建议仲裁重评。",
         "conflict_dims": ["substantive_resolution", "thorough_reasoning", "correct_law_application"],
     },
+    {
+        # R11 依赖 claim_support 维度解析结果中的 expectation_gap.overall_ratio。
+        # 调用方应将 overall_ratio 以键 "claim_support_overall_ratio" 传入
+        # cross_check_consistency（浮点，0-1）；缺省 1.0 表示无数据、不触发。
+        "id": "R11",
+        "name": "诉请支持率极低且说理不足",
+        "check": lambda s: (
+            float(s.get("claim_support_overall_ratio", 1.0)) < 0.3
+            and s.get("thorough_reasoning", 0) < 70
+        ),
+        "message": "诉请总体支持率极低(<30%)且说理得分不足(<70)，当事人预期与裁判结果落差大：建议强化说理/判后答疑，降低上诉申诉风险。",
+        "conflict_dims": ["claim_support", "thorough_reasoning"],
+    },
+    {
+        # R12 依赖 claim_support 维度解析结果中的扣分编号（CS-B02/CS-B03）与审级。
+        # 调用方应将命中编号（如 "CS-B02,CS-B03"）以键 "claim_support_hit_codes" 传入，
+        # 并将审级以键 "trial_stage" 传入；缺省不触发。
+        "id": "R12",
+        "name": "二审遗漏诉讼请求程序风险",
+        "check": lambda s: (
+            s.get("trial_stage", "") == "二审"
+            and any(code in str(s.get("claim_support_hit_codes", "")) for code in ("CS-B02", "CS-B03"))
+        ),
+        "message": "遗漏诉讼请求程序风险提示（参照民事诉讼法及司法解释对遗漏诉请二审处理的规定）：二审对诉请零回应或对变更/增加诉请未审理且无程序处理，存在漏审程序违法风险，建议核查是否应当发回重审或一并审理。",
+        "conflict_dims": ["claim_support"],
+    },
 ]
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent.parent / "skills"
 ANCHORS_DIR = Path(__file__).resolve().parent.parent.parent / "anchors"
+
+# ── 红旗预警与一票否决机制（v0.4.0）─────────────────────────────
+# 设计原则：加权综合分会稀释致命信号（如遗漏诉请该发回重审的判决可能拿 B+）。
+# LLM 只提名（red_flag_candidates），规则层按下列确定性规则裁决封顶：
+#   Veto 级（一票否决）：final = min(加权分, 59)，等级强制 F + 红旗标注
+#   Warning 级（预警）：  final = min(加权分, 74)，C+ 预警标注
+# 红旗封顶优先于 MINIMUM_SCORE 托底（托底是防过低、红旗是强制足够低，红旗赢）。
+
+RED_FLAG_VETO_CAP = 59
+RED_FLAG_WARNING_CAP = 74
+
+DOCUMENT_TYPE_JUDGMENT = "judgment"
+DOCUMENT_TYPE_ADMINISTRATIVE = "administrative_decision"
+
+# 行政决定书标题关键词（document_type 自动检测兜底）
+ADMIN_DOC_TITLE_PATTERN = r"行政处理决定书|行政处罚决定书|责令改正|复议决定"
+JUDGMENT_DOC_TITLE_PATTERN = r"判决书|裁定书"
+
+
+def _rf_cs_counts(claim_support: dict) -> dict:
+    """从 claim_support 解析结果的 deduction_items 中统计 CS-Bxx 命中次数（每个扣分项同一编号只计1次）。"""
+    counts: dict = {}
+    for it in (claim_support or {}).get("deduction_items") or []:
+        if not isinstance(it, dict):
+            continue
+        text = " ".join(str(it.get(k, "")) for k in ("item", "basis", "reason", "quote"))
+        for code in set(re.findall(r"CS-B\d{2}", text)):
+            counts[code] = counts.get(code, 0) + 1
+    return counts
+
+
+def _rf_cs_claims(claim_support: dict, code: str) -> list:
+    """提取某 CS-Bxx 扣分项关联的诉请编号（claim_ref 字段或 item 文本中的 CS-\d+）。"""
+    claim_ids: list = []
+    for it in (claim_support or {}).get("deduction_items") or []:
+        if not isinstance(it, dict):
+            continue
+        text = " ".join(str(it.get(k, "")) for k in ("item", "basis", "reason", "quote"))
+        if code not in text:
+            continue
+        explicit = it.get("claim_ref") or it.get("claim_id")
+        if explicit:
+            claim_ids.append(str(explicit))
+        claim_ids.extend(re.findall(r"CS-\d+", text))
+    seen, unique = set(), []
+    for cid in claim_ids:
+        if cid not in seen:
+            seen.add(cid)
+            unique.append(cid)
+    return unique
+
+
+def _rf_cs_evidence(claim_support: dict, code: str) -> str:
+    """提取某 CS-Bxx 扣分项的证据摘录（item 名称 + quote）。"""
+    parts: list = []
+    for it in (claim_support or {}).get("deduction_items") or []:
+        if not isinstance(it, dict):
+            continue
+        text = " ".join(str(it.get(k, "")) for k in ("item", "basis", "reason", "quote"))
+        if code in text:
+            seg = str(it.get("item", "")).strip() or text[:60]
+            quote = str(it.get("quote", "")).strip()
+            parts.append(f"{seg}（{quote[:40]}…）" if quote else seg)
+    return "；".join(parts[:3])
+
+
+def _rf_findings(red_flag_inputs: dict) -> list:
+    """归一化 red_flag_inputs 中的 critical 发现列表（容忍多种联动输入形态）。"""
+    if not red_flag_inputs:
+        return []
+    findings: list = []
+    if isinstance(red_flag_inputs, list):
+        return [f for f in red_flag_inputs if isinstance(f, dict)]
+    for key in ("findings", "critical_findings", "hallucination_findings",
+                "anomaly_findings", "hallucination", "anomaly", "items"):
+        val = red_flag_inputs.get(key)
+        if isinstance(val, list):
+            findings.extend(f for f in val if isinstance(f, dict))
+    for key, val in red_flag_inputs.items():
+        if re.match(r"^(H-\d+|A\d+)$", str(key)) and isinstance(val, dict):
+            findings.append({"code": key, **val})
+    return findings
+
+
+def _rf_has_critical_code(red_flag_inputs: dict, code: str) -> bool:
+    """是否存在指定编号（如 H-1/H-2/H-7/A9）的 critical 发现。"""
+    for f in _rf_findings(red_flag_inputs):
+        if str(f.get("severity", "")).lower() != "critical":
+            continue
+        fcode = str(f.get("code", f.get("a_code", "")))
+        if fcode == code:
+            return True
+    return False
+
+
+def _rf_has_procedural_critical(red_flag_inputs: dict) -> bool:
+    """是否存在程序类 critical 异常（A9 或 type 含程序/procedur）。"""
+    for f in _rf_findings(red_flag_inputs):
+        if str(f.get("severity", "")).lower() != "critical":
+            continue
+        fcode = str(f.get("code", f.get("a_code", "")))
+        ftype = str(f.get("type", ""))
+        if fcode == "A9" or "procedur" in ftype.lower() or "程序" in ftype:
+            return True
+    return False
+
+
+def _rf_overall_ratio(claim_support: dict):
+    """读取 claim_support.expectation_gap.overall_ratio，缺数据返回 None。"""
+    gap = (claim_support or {}).get("expectation_gap") or {}
+    ratio = gap.get("overall_ratio")
+    try:
+        return float(ratio) if ratio is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _rf_discretion_hit(claim_support: dict, keywords: list) -> bool:
+    """裁量点 issue 含指定职权类关键词且 grade 不合格（不充分）。"""
+    for dp in (claim_support or {}).get("discretion_points") or []:
+        if not isinstance(dp, dict):
+            continue
+        issue = str(dp.get("issue", ""))
+        grade = str(dp.get("grade", ""))
+        if any(kw in issue for kw in keywords) and grade == "不充分":
+            return True
+    return False
+
+
+def _rf_high_gap_claims(claim_support: dict) -> list:
+    gap = (claim_support or {}).get("expectation_gap") or {}
+    return [str(c) for c in (gap.get("high_gap_claims") or [])]
+
+
+def _rf_score_below(scores: dict, dim: str, threshold: float) -> bool:
+    try:
+        return float(scores.get(dim, 100)) < threshold
+    except (ValueError, TypeError):
+        return False
+
+
+RED_FLAG_RULES = [
+    # ── Veto 级（任一触发 → final=min(加权分,59)，等级强制F+红旗标注）──
+    {
+        "id": "RF-V1",
+        "level": "veto",
+        "name": "变更/增加诉讼请求未审理且无程序处理",
+        "cs_code": "CS-B03",
+        "check": lambda ctx: _rf_cs_counts(ctx.get("claim_support")).get("CS-B03", 0) >= 1,
+        "consequence": "存在二审撤销原判发回重审的强信号（《民事诉讼法》第一百七十七条第一款第四项及遗漏诉讼请求的司法解释口径）",
+        "legal_refs": ["《民事诉讼法》第一百七十七条第一款第四项"],
+    },
+    {
+        "id": "RF-V2",
+        "level": "veto",
+        "name": "诉讼请求零回应≥2项或程序类critical异常",
+        "cs_code": "CS-B02",
+        "check": lambda ctx: (
+            _rf_cs_counts(ctx.get("claim_support")).get("CS-B02", 0) >= 2
+            or _rf_has_procedural_critical(ctx.get("red_flag_inputs"))
+        ),
+        "consequence": "存在二审撤销原判发回重审的强信号（《民事诉讼法》第一百七十七条第一款第四项及遗漏诉讼请求的司法解释口径）",
+        "legal_refs": ["《民事诉讼法》第一百七十七条第一款第四项"],
+    },
+    {
+        "id": "RF-V3",
+        "level": "veto",
+        "name": "无源编造（引用不实法条/案号）",
+        "check": lambda ctx: _rf_has_critical_code(ctx.get("red_flag_inputs"), "H-1"),
+        "consequence": "存在引用不实法条/案号的强信号，属再审监督/依职权纠正情形",
+        "legal_refs": [],
+    },
+    {
+        "id": "RF-V4",
+        "level": "veto",
+        "name": "裁判结果无支撑",
+        "check": lambda ctx: _rf_has_critical_code(ctx.get("red_flag_inputs"), "H-7"),
+        "consequence": "存在裁判结果缺乏依据支撑的强信号，上诉/再审改判风险高",
+        "legal_refs": [],
+    },
+    # ── Warning 级（任一触发 → final=min(加权分,74)，C+预警标注）──
+    {
+        "id": "RF-W1",
+        "level": "warning",
+        "name": "核心诉请结论式驳斥",
+        "cs_code": "CS-B05",
+        "check": lambda ctx: (
+            _rf_cs_counts(ctx.get("claim_support")).get("CS-B05", 0) >= 1
+            and (
+                bool(set(_rf_cs_claims(ctx.get("claim_support"), "CS-B05"))
+                     & set(_rf_high_gap_claims(ctx.get("claim_support"))))
+                # CS-B05 扣分项未标注诉请编号时，只要存在高落差诉请即触发（保守联动）
+                or (not _rf_cs_claims(ctx.get("claim_support"), "CS-B05")
+                    and bool(_rf_high_gap_claims(ctx.get("claim_support"))))
+            )
+        ),
+        "consequence": "核心诉请结论式驳斥，上诉争点强化风险",
+        "legal_refs": [],
+    },
+    {
+        "id": "RF-W2",
+        "level": "warning",
+        "name": "预期落差大且说理不足",
+        "check": lambda ctx: (
+            (_rf_overall_ratio(ctx.get("claim_support")) is not None
+             and _rf_overall_ratio(ctx.get("claim_support")) < 0.3
+             and _rf_score_below(ctx.get("scores"), "thorough_reasoning", 70))
+        ),
+        "consequence": "预期落差大且说理不足，建议判后答疑与说理补强（与交叉校验R11衔接：R11为提示，RF-W2为封顶）",
+        "legal_refs": [],
+    },
+    {
+        "id": "RF-W3",
+        "level": "warning",
+        "name": "主文不明确/不可执行≥2项",
+        "cs_code": "CS-B10",
+        "check": lambda ctx: _rf_cs_counts(ctx.get("claim_support")).get("CS-B10", 0) >= 2,
+        "consequence": "主文不明确/不可执行，执源治理风险（法发〔2024〕16号第十五条）",
+        "legal_refs": ["《最高人民法院关于在审判工作中促进提质增效 推动实质性化解矛盾纠纷的指导意见》（法发〔2024〕16号）第十五条"],
+    },
+]
+
+# 行政决定模式（document_type=administrative_decision）专用规则，法条已核验原文。
+# 统一后果文案 + AV1-AV5 Veto 级（封顶59）、AV6 Warning 级（封顶74）。
+_ADMIN_CONSEQUENCE = "存在被行政复议撤销/变更（《行政复议法》第六十三条、第六十四条）或行政诉讼撤销/变更（《行政诉讼法》第七十条、第七十七条）的强信号"
+
+ADMIN_RED_FLAG_RULES = [
+    {
+        "id": "AV1",
+        "level": "veto",
+        "name": "主要证据不足",
+        "check": lambda ctx: _rf_score_below(ctx.get("scores"), "sufficient_evidence", 60),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第一项", "《行政复议法》（2023修订）第六十四条第一项"],
+    },
+    {
+        "id": "AV2",
+        "level": "veto",
+        "name": "适用法律法规错误",
+        "check": lambda ctx: (
+            _rf_score_below(ctx.get("scores"), "correct_law_application", 60)
+            or _rf_has_critical_code(ctx.get("red_flag_inputs"), "H-2")
+        ),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第二项", "《行政复议法》（2023修订）第六十四条第三项（适用的依据不合法）"],
+    },
+    {
+        "id": "AV3",
+        "level": "veto",
+        "name": "违反法定程序",
+        "check": lambda ctx: _rf_has_procedural_critical(ctx.get("red_flag_inputs")),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第三项", "《行政复议法》（2023修订）第六十四条第二项"],
+    },
+    {
+        "id": "AV4",
+        "level": "veto",
+        "name": "超越职权",
+        "check": lambda ctx: _rf_discretion_hit(ctx.get("claim_support"), ["超越职权", "越权", "无权限"]),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第四项", "《行政复议法》（2023修订）第六十四条第四项"],
+    },
+    {
+        "id": "AV5",
+        "level": "veto",
+        "name": "滥用职权",
+        "check": lambda ctx: _rf_discretion_hit(ctx.get("claim_support"), ["滥用职权"]),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第五项", "《行政复议法》（2023修订）第六十四条第四项"],
+    },
+    {
+        "id": "AV6",
+        "level": "warning",
+        "name": "明显不当/款额确定错误",
+        "check": lambda ctx: (
+            _rf_cs_counts(ctx.get("claim_support")).get("CS-B04", 0) >= 1
+            or _rf_cs_counts(ctx.get("claim_support")).get("CS-B08", 0) >= 1
+        ),
+        "consequence": _ADMIN_CONSEQUENCE,
+        "legal_refs": ["《行政诉讼法》第七十条第六项", "《行政诉讼法》第七十七条", "《行政复议法》（2023修订）第六十三条"],
+    },
+]
 
 _CHARS_PER_TOKEN_ZH = 1.5
 _CHARS_PER_TOKEN_EN = 4.0

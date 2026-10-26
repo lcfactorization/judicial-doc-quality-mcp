@@ -1,6 +1,6 @@
-"""judicial-doc-quality-mcp v0.2.0 — Bridge Architecture for Judicial Document Quality Assessment."""
+"""judicial-doc-quality-mcp v0.4.0 — Bridge Architecture for Judicial Document Quality Assessment."""
 
-__version__ = "0.2.0"
+__version__ = "0.4.0"
 
 from .config import (
     ANOMALY_DEDUCTION,

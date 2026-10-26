@@ -1,17 +1,17 @@
-"""End-to-end test for Phase 1 MVP — All 7 Dimensions
+"""End-to-end test for Phase 1 MVP — All 8 Dimensions
 
 Tests cover:
-1. SkillLoader & TemplateRenderer (all 7 dimensions)
-2. Anchor loading (all 7 dimensions)
+1. SkillLoader & TemplateRenderer (all 8 dimensions)
+2. Anchor loading (all 8 dimensions)
 3. ResponseParser (including JSON tolerance)
-4. Cross-check consistency (10 rules)
+4. Cross-check consistency (12 rules)
 5. Document section extraction
-6. render_dimension_prompt (core tool, all 7 dimensions)
+6. render_dimension_prompt (core tool, all 8 dimensions)
 7. parse_score_result with mock LLM responses
 8. calculate_weighted_score with anomaly deduction & innovation bonus
 9. apply_anomaly_deduction & apply_innovation_bonus tools
 10. generate_report tool
-11. Full pipeline dry-run (all 7 dimensions)
+11. Full pipeline dry-run (all 8 dimensions)
 """
 
 import json
@@ -227,6 +227,7 @@ ALL_DIMENSIONS = [
     "thorough_reasoning",
     "substantive_resolution",
     "concise_language",
+    "claim_support",
 ]
 
 
@@ -242,7 +243,7 @@ def test_skill_loader():
     for d in dims:
         print(f"  - {d['name']}: {d['title']} (weight={d['weight']}, full_score={d['full_score']})")
 
-    assert len(dims) == 7, f"Expected 7 dimensions, got {len(dims)}"
+    assert len(dims) == 8, f"Expected 8 dimensions, got {len(dims)}"
 
     for dim_name in ALL_DIMENSIONS:
         meta, body = loader.load(f"dimensions/{dim_name}")
@@ -741,7 +742,7 @@ def test_full_pipeline_dryrun():
         "case_followup_text": "",
     }
 
-    print("  Step 2: Render dimension prompts (all 7 dimensions)...")
+    print("  Step 2: Render dimension prompts (all 8 dimensions)...")
     for dim in ALL_DIMENSIONS:
         prompt_json = render_dimension_prompt(
             dimension=dim,

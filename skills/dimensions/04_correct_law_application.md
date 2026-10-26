@@ -4,7 +4,7 @@ title: 法律适用正确
 type: dimension
 layer: substance
 order: 4
-weight: 0.18
+weight: 0.15
 full_score: 100
 output_format: dimension_score
 ---

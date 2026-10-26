@@ -28,16 +28,20 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from .config import (
+    ADMIN_DOC_TITLE_PATTERN,
     ANOMALY_DEDUCTION,
     ANOMALY_MCP_CONFIG,
     ANOMALY_TOTAL_MAX_DEDUCTION,
     CROSS_CHECK_RULES,
     DIMENSION_ORDER,
     DIMENSION_TITLES,
+    DOCUMENT_TYPE_ADMINISTRATIVE,
+    DOCUMENT_TYPE_JUDGMENT,
     ErrorCode,
     EVASIVE_PATTERNS,
     INNOVATION_BONUS,
     INNOVATION_TOTAL_MAX_BONUS,
+    JUDGMENT_DOC_TITLE_PATTERN,
     QUALITY_DIMENSIONS,
     QUALITY_GRADES,
     QUALITY_WEIGHTS,
@@ -340,6 +344,9 @@ def calculate_weighted_score(
     scores: dict,
     anomaly_items: list[dict] | None = None,
     innovation_items: list[dict] | None = None,
+    document_type: str = DOCUMENT_TYPE_JUDGMENT,
+    red_flag_inputs: dict | None = None,
+    claim_support_result: dict | None = None,
 ) -> str:
     """计算加权总分并确定等级。纯规则函数，零 Token 消耗。
 
@@ -354,14 +361,25 @@ def calculate_weighted_score(
     innovation_items: 创新性加分项列表，每项含 type, bonus, description。
                       type可选: mediation_success, legal_gap_filling, framework_breakthrough,
                       judicial_logic, complex_dispute_resolution
+    document_type: 文书类型——"judgment"（判决/裁定，默认，适用RED_FLAG_RULES）
+                   | "administrative_decision"（行政决定，适用ADMIN_RED_FLAG_RULES）
+    red_flag_inputs: hallucination/anomaly联动的critical发现（如 H-1无源编造/H-2法条误用/
+                     H-7结果无支撑/A9程序类），结构如 {"findings": [{"code": "H-1",
+                     "severity": "critical", "description": "..."}]}
+    claim_support_result: claim_support 维度解析结果（含 deduction_items/expectation_gap/
+                          discretion_points），供红旗规则确定性提取CS码与支持率
 
     返回 JSON 字符串，包含：
-    - weighted_total: 加权总分（含异常扣分和创新加分调整后）
+    - weighted_total: 加权总分（含异常扣分、创新加分、托底与红旗封顶后的终分）
+    - weighted_raw_score: 封顶前加权原始分
+    - final_score: 终分（=weighted_total）
     - base_weighted_total: 基础加权总分（调整前）
     - anomaly_deduction: 异常扣分总额
     - innovation_bonus: 创新性加分总额
     - grade: 等级（A/B/C/D/F）
     - grade_description: 等级描述
+    - red_flag_level: 红旗最高级别（veto/warning/None）
+    - red_flags: 触发的红旗列表（rule_id/level/name/evidence/claim_ref/consequence/legal_refs）
     - dimension_details: 各维度得分明细
     - anomaly_details: 异常扣分明细
     - innovation_details: 创新性加分明细
@@ -375,7 +393,14 @@ def calculate_weighted_score(
                 int_scores[k] = 0
                 logger.warning("calculate_weighted_score: invalid score for %s: %s, set to 0", k, v)
 
-        result = _parser.calculate_weighted_score(int_scores, anomaly_items, innovation_items)
+        result = _parser.calculate_weighted_score(
+            int_scores,
+            anomaly_items,
+            innovation_items,
+            document_type=document_type,
+            red_flag_inputs=red_flag_inputs,
+            claim_support_result=claim_support_result,
+        )
         return json.dumps({"success": True, **result}, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("calculate_weighted_score: %s", e, exc_info=True)
@@ -389,6 +414,10 @@ def cross_check_consistency(scores: dict) -> str:
     纯规则引擎，零 Token 消耗。Agent 在收集所有维度评分后应调用此工具。
 
     scores: 各维度得分字典，如 {"thorough_reasoning": 78, "substantive_resolution": 65, ...}
+            另支持辅助键（v0.4.0 交叉校验联动）：
+            - claim_support_overall_ratio: claim_support 维度 expectation_gap.overall_ratio（浮点0-1，触发R11）
+            - claim_support_hit_codes: 命中的CS-B编号（如 "CS-B02,CS-B03"，触发R12）
+            - trial_stage: 审级（如 "二审"，触发R12）
 
     返回 JSON 字符串，包含：
     - conflict_detected: 是否检测到冲突
@@ -398,13 +427,18 @@ def cross_check_consistency(scores: dict) -> str:
     """
     try:
         from .rule_engine import cross_check_consistency as _cross_check
-        int_scores = {}
+        normalized_scores = {}
         for k, v in scores.items():
-            try:
-                int_scores[k] = int(v)
-            except (ValueError, TypeError):
-                int_scores[k] = 0
-        result = _cross_check(int_scores)
+            if isinstance(v, bool):
+                normalized_scores[k] = int(v)
+            elif isinstance(v, (int, float)):
+                # 保留浮点精度（如 claim_support_overall_ratio=0.25），
+                # 整数型维度得分仍规范化为 int
+                normalized_scores[k] = int(v) if float(v).is_integer() else float(v)
+            else:
+                # 非数值辅助键（如 claim_support_hit_codes、trial_stage）原样透传
+                normalized_scores[k] = v
+        result = _cross_check(normalized_scores)
         return json.dumps({"success": True, **result}, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error("cross_check_consistency: %s", e, exc_info=True)
@@ -544,33 +578,54 @@ def get_dimension_standards(dimension: str) -> str:
         deduction_items = []
         bonus_items = []
 
-        deduction_pattern = re.compile(r"\|\s*([A-Z]-\d+)\s*\|\s*(.+?)\s*\|\s*[-]?(\d+)[~至]+(\d+)?\s*\|\s*(.+?)\s*\|")
-        for m in deduction_pattern.finditer(body):
-            deduction_items.append({
-                "code": m.group(1),
-                "item": m.group(2).strip(),
-                "deduction_range": f"-{m.group(3)}" + (f"至-{m.group(4)}" if m.group(4) else ""),
-                "standard": m.group(5).strip(),
-            })
+        # v0.4.0: 兼容两类编号风格——"R-01/SR-01"与"CS-B01/CS-IB01"（claim_support 维度）；
+        # 数值列允许"+5"/"+5至+10"/"-5/项（上限-15）"等带说明后缀的写法。
+        innovation_pattern = re.compile(
+            r"\|\s*([A-Z]{1,3}-IB\d+)\s*\|\s*(.+?)\s*\|\s*\+?(\d+)(?:[~至][-+]?(\d+))?(?:/项)?(?:（[^）]*）)?\s*\|\s*(.+?)\s*\|"
+        )
+        bonus_pattern = re.compile(
+            r"\|\s*([A-Z]{1,3}-B\d+)\s*\|\s*(.+?)\s*\|\s*\+?(\d+)(?:[~至][-+]?(\d+))?(?:/项)?(?:（[^）]*）)?\s*\|\s*(.+?)\s*\|"
+        )
+        deduction_pattern = re.compile(
+            r"\|\s*([A-Z]{1,3}-[A-Z]{0,2}\d+)\s*\|\s*(.+?)\s*\|\s*[-]?(\d+)(?:[~至][-+]?(\d+))?(?:/项)?(?:（[^）]*）)?\s*\|\s*(.+?)\s*\|"
+        )
 
-        bonus_pattern = re.compile(r"\|\s*([A-Z]-B\d+)\s*\|\s*(.+?)\s*\|\s*\+(\d+)[~至]+(\d+)?\s*\|\s*(.+?)\s*\|")
-        for m in bonus_pattern.finditer(body):
-            bonus_items.append({
-                "code": m.group(1),
-                "item": m.group(2).strip(),
-                "bonus_range": f"+{m.group(3)}" + (f"至+{m.group(4)}" if m.group(4) else ""),
-                "standard": m.group(5).strip(),
-            })
+        captured_codes = set()
 
-        innovation_pattern = re.compile(r"\|\s*([A-Z]-IB\d+)\s*\|\s*(.+?)\s*\|\s*\+(\d+)[~至]+(\d+)?\s*\|\s*(.+?)\s*\|")
         for m in innovation_pattern.finditer(body):
+            code = m.group(1)
             bonus_items.append({
-                "code": m.group(1),
+                "code": code,
                 "item": m.group(2).strip(),
                 "bonus_range": f"+{m.group(3)}" + (f"至+{m.group(4)}" if m.group(4) else ""),
                 "standard": m.group(5).strip(),
                 "is_innovation": True,
             })
+            captured_codes.add(code)
+
+        for m in bonus_pattern.finditer(body):
+            code = m.group(1)
+            if code in captured_codes:
+                continue
+            bonus_items.append({
+                "code": code,
+                "item": m.group(2).strip(),
+                "bonus_range": f"+{m.group(3)}" + (f"至+{m.group(4)}" if m.group(4) else ""),
+                "standard": m.group(5).strip(),
+            })
+            captured_codes.add(code)
+
+        for m in deduction_pattern.finditer(body):
+            code = m.group(1)
+            if code in captured_codes:
+                continue
+            deduction_items.append({
+                "code": code,
+                "item": m.group(2).strip(),
+                "deduction_range": f"-{m.group(3)}" + (f"至-{m.group(4)}" if m.group(4) else ""),
+                "standard": m.group(5).strip(),
+            })
+            captured_codes.add(code)
 
         result = {
             "success": True,
@@ -605,7 +660,7 @@ def estimate_token_budget(
     2. 判断是否需要分批评估（避免超出上下文窗口）
     3. 规划最优的并行/串行调用策略
 
-    dimensions: 要评估的维度列表（默认全部7个维度）
+    dimensions: 要评估的维度列表（默认全部8个维度）
     include_anchors: 是否包含锚定示例（默认 true）
     anchor_count: 每个维度的锚定示例数量（默认 3）
     document_char_count: 文书全文的字符数（默认 5000）
@@ -621,7 +676,7 @@ def estimate_token_budget(
     """
     logger.info(
         "estimate_token_budget: >>> ENTER | dims=%s, doc_chars=%d, context_window=%d",
-        dimensions if dimensions else "ALL(7)", document_char_count, model_context_window,
+        dimensions if dimensions else f"ALL({len(QUALITY_WEIGHTS)})", document_char_count, model_context_window,
     )
     try:
         if dimensions is None:
@@ -711,6 +766,22 @@ def estimate_token_budget(
         return _make_error(ErrorCode.INTERNAL_ERROR, f"Token预算预估异常：{e}", retryable=True)
 
 
+def _infer_document_type(document_meta: dict | None) -> str:
+    """按文书标题/元信息正则自动检测 document_type（generate_report 兜底）。
+
+    含"行政处理决定书|行政处罚决定书|责令改正|复议决定"→ administrative_decision；
+    含"判决书|裁定书"→ judgment；无命中时返回 judgment（默认）。
+    """
+    if not document_meta:
+        return DOCUMENT_TYPE_JUDGMENT
+    text = " ".join(str(v) for v in document_meta.values() if isinstance(v, str))
+    if re.search(ADMIN_DOC_TITLE_PATTERN, text):
+        return DOCUMENT_TYPE_ADMINISTRATIVE
+    if re.search(JUDGMENT_DOC_TITLE_PATTERN, text):
+        return DOCUMENT_TYPE_JUDGMENT
+    return DOCUMENT_TYPE_JUDGMENT
+
+
 @mcp.tool()
 def generate_report(
     dimension_results: list[dict],
@@ -737,6 +808,9 @@ def generate_report(
     report_id: str | None = None,
     minimum_score_applied: bool = False,
     trial_stage: str = "",
+    document_type: str | None = None,
+    red_flags: list[dict] | None = None,
+    weighted_raw_score: float | None = None,
 ) -> str:
     """生成结构化 Markdown 评分报告。纯规则函数，零 Token 消耗。
 
@@ -744,7 +818,7 @@ def generate_report(
     支持 GitHub Alerts 风格（NOTE/TIP/IMPORTANT/WARNING/CAUTION）的 quote block。
 
     dimension_results: 各维度评分结果列表（来自 parse_score_result 的 parsed 字段）
-    weighted_total: 加权总分（来自 calculate_weighted_score）
+    weighted_total: 加权总分（来自 calculate_weighted_score 的 final_score）
     grade: 等级（来自 calculate_weighted_score）
     cross_check: 一致性检查结果（来自 cross_check_consistency，可选）
     anomaly_deduction: 异常扣分总额（来自 calculate_weighted_score）
@@ -766,9 +840,18 @@ def generate_report(
     coupling_analysis: 异常耦合分析结果（来自 ResponseParser.compute_coupling_analysis，可选）
     report_id: 报告编号（如不提供则自动生成，可选）
     minimum_score_applied: 是否适用了底线尊重原则（默认 False）
+    document_type: 文书类型 "judgment"|"administrative_decision"；未显式传入时按文书标题正则
+                   自动检测（含"行政处理决定书|行政处罚决定书|责令改正|复议决定"→行政决定；
+                   "判决书|裁定书"→判决/裁定；默认 judgment）
+    red_flags: 红旗列表（来自 calculate_weighted_score 的 red_flags，可选）——触发时报告顶部
+               渲染红旗 banner（🚩一票否决级/⚠️预警级）
+    weighted_raw_score: 红旗封顶前加权原始分（来自 calculate_weighted_score，可选）——
+                        与红旗并存时终分行展示"加权 X → 终评 Y（红旗封顶）"
 
     返回 JSON 字符串，包含 report_markdown 字段。
     """
+    if document_type is None:
+        document_type = _infer_document_type(document_meta)
     return _report_builder.build_report_markdown(
         dimension_results=dimension_results,
         weighted_total=weighted_total,
@@ -794,6 +877,9 @@ def generate_report(
         report_id=report_id,
         minimum_score_applied=minimum_score_applied,
         trial_stage=trial_stage,
+        document_type=document_type,
+        red_flags=red_flags,
+        weighted_raw_score=weighted_raw_score,
     )
 
 
@@ -890,7 +976,7 @@ def query_anomaly_mcp(
 
     推荐搭配使用：https://github.com/lcfactorization/judicial-doc-anomaly-mcp
     该项目提供16维司法文书异常检测能力，与本项目形成互补：
-    - 本项目（judicial-doc-quality-mcp）：评估文书质量，7维评分+创新加分
+    - 本项目（judicial-doc-quality-mcp）：评估文书质量，8维评分+创新加分
     - anomaly-mcp（judicial-doc-anomaly-mcp）：检测文书异常，16维异常+扣分联动
 
     document_text: 裁判文书全文

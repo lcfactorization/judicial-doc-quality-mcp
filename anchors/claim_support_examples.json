@@ -1,0 +1,105 @@
+[
+    {
+        "level": "excellent",
+        "score": 97,
+        "quote": "本院认为，关于某劳动者主张的第一项诉讼请求（未签订书面劳动合同二倍工资差额），其计算方式为：月工资8000元×11个月=88000元，本院予以支持；关于第二项诉讼请求（加班工资），某劳动者提供的考勤表显示工作日延长工作时间合计420小时，以月工资8000元折算小时工资45.98元，加班费为45.98×420×150%=28967元；对某用人单位提出的'已安排调休'抗辩，经查调休记录仅覆盖96小时，其余324小时未安排调休，该抗辩部分成立。综上，判决如下：一、某用人单位于本判决生效之日起十日内支付某劳动者二倍工资差额88000元；二、支付加班工资差额28967元；……如不服本判决，可在判决书送达之日起十五日内向本院递交上诉状，上诉于XX省XX市中级人民法院。",
+        "reasoning": "全部诉请逐项登记并逐一回应，金额类诉请均披露'基数×期间×比例'完整算式，可复核；裁量点四要素齐备（法律依据、考量因素、对方抗辩回应、评级）；确认之诉与给付之诉一并解决；主文判项明确可执行，并告知上诉救济途径，实现预期管理闭环。调休抵扣时长的认定已回应抗辩，考量因素披露基本充分。",
+        "sub_scores": {
+            "诉请台账完整性": {"score": 15, "max": 15, "items": ["全部诉请逐项登记于claim_ledger，无缺行"]},
+            "逐项回应性": {"score": 25, "max": 25, "items": ["每项诉请均有对应判项或说理回应，无零回应项"]},
+            "支持度透明核算": {"score": 15, "max": 15, "items": ["二倍工资差额与加班费均给出完整算式"]},
+            "裁量合理性": {"score": 22, "max": 30, "items": ["CS-B06: -8（调休抵扣时长的裁量认定披露了结果，考量因素披露可再充分）"]},
+            "预期管理与息讼效果": {"score": 15, "max": 15, "items": ["判项明确可执行，CS-IB02: +5（告知上诉救济途径）计入总分"]}
+        },
+        "claim_ledger": [
+            {"claim_id": "CS-1", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付未签订书面劳动合同二倍工资差额", "claimed_amount": 88000, "awarded_amount": 88000, "support_ratio": 1.0, "disposition": "支持", "reasoning_quality": "算式透明，基数与期间可复核"},
+            {"claim_id": "CS-2", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付加班工资", "claimed_amount": 45000, "awarded_amount": 28967, "support_ratio": 0.64, "disposition": "部分支持", "reasoning_quality": "算式透明，调休抗辩已逐段回应"},
+            {"claim_id": "CS-3", "type": "确认之诉", "subject": "某劳动者请求确认与某用人单位存在劳动关系", "claimed_amount": null, "awarded_amount": null, "support_ratio": 1.0, "disposition": "支持", "reasoning_quality": "说理充分，与给付请求一并解决（CS-IB03一次性解决关联请求）"}
+        ],
+        "discretion_points": [
+            {"issue": "加班费调休抵扣认定", "legal_basis_cited": "《劳动法》第44条", "factors_disclosed": "调休记录覆盖时长、未抵扣小时数", "adversarial_response": "已回应'已安排调休'抗辩并说明部分成立理由", "grade": "充分"}
+        ],
+        "expectation_gap": {
+            "performance_claims_total": 133000,
+            "awarded_total": 116967,
+            "overall_ratio": 0.88,
+            "high_gap_claims": []
+        },
+        "litigation_followup": {
+            "internal_signals": "文书内未见衍生诉讼信号，关联请求一次性解决",
+            "external_query": "如可获取：双方均未上诉，服判息诉"
+        },
+        "data_completeness": "complete",
+        "bonus_items": [
+            {"item": "CS-IB02 判后答疑/救济指引", "bonus": 5, "quote": "如不服本判决，可在判决书送达之日起十五日内……提起上诉", "reason": "明确告知上诉权与上诉期，预期管理到位"}
+        ],
+        "comment": "诉请支持度优秀：台账完整、算式透明、裁量四要素齐备、救济途径告知到位（92+5=97）"
+    },
+    {
+        "level": "medium",
+        "score": 65,
+        "quote": "（20XX）X民终XXXX号民事判决书载明：关于某劳动者主张的违法解除劳动合同赔偿金96000元，本院认为，某劳动者未能提供充分证据证明某用人单位存在违法解除情形，对该项请求不予支持。判决如下：一、某用人单位于本判决生效之日起十日内支付某劳动者未休年休假工资报酬5200元；二、驳回某劳动者的其他诉讼请求。本案审理中，某劳动者于庭审时增加要求某用人单位支付未足额缴纳社会保险费损失补偿的诉讼请求，判决书对此既未审理，亦未作任何程序处理。判决后，某劳动者就社会保险损失另行提起诉讼。",
+        "reasoning": "多诉请中两项大额请求（赔偿金等）被整体驳回，其中赔偿金仅有'未能提供充分证据'一处结论式驳斥，未展开举证责任与证据评价分析；庭审中增加的诉讼请求已登记台账但既未审理也无程序处理，属程序遗漏；驳回后当事人随即衍生一件另案，预期落差未被说理吸收。支持部分的年休假工资判项明确，其他子项表现尚可。",
+        "sub_scores": {
+            "诉请台账完整性": {"score": 15, "max": 15, "items": ["庭审增加的诉请已登记入claim_ledger（CS-3），无缺行"]},
+            "逐项回应性": {"score": 5, "max": 25, "items": ["CS-B03: -20（增加的诉请未审理且无程序处理）"]},
+            "支持度透明核算": {"score": 15, "max": 15, "items": ["年休假工资算式基本可复核"]},
+            "裁量合理性": {"score": 15, "max": 30, "items": ["CS-B05: -15（违法解除赔偿金仅结论式驳斥）"]},
+            "预期管理与息讼效果": {"score": 15, "max": 15, "items": ["判项明确；衍生1件另案作为litigation_followup内部信号记录，未重复扣分"]}
+        },
+        "claim_ledger": [
+            {"claim_id": "CS-1", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付违法解除劳动合同赔偿金", "claimed_amount": 96000, "awarded_amount": 0, "support_ratio": 0.0, "disposition": "驳回", "reasoning_quality": "结论式驳斥，无论证"},
+            {"claim_id": "CS-2", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付未休年休假工资报酬", "claimed_amount": 5200, "awarded_amount": 5200, "support_ratio": 1.0, "disposition": "支持", "reasoning_quality": "算式基本可复核"},
+            {"claim_id": "CS-3", "type": "给付之诉", "subject": "某劳动者庭审增加请求某用人单位支付社会保险费损失补偿", "claimed_amount": 30000, "awarded_amount": null, "support_ratio": null, "disposition": "未回应", "reasoning_quality": "未审理亦无程序处理"}
+        ],
+        "discretion_points": [
+            {"issue": "违法解除举证责任与证据评价", "legal_basis_cited": "未引用具体条文", "factors_disclosed": "未披露", "adversarial_response": "未回应某劳动者关于解除程序违法的主张", "grade": "不充分"}
+        ],
+        "expectation_gap": {
+            "performance_claims_total": 131200,
+            "awarded_total": 5200,
+            "overall_ratio": 0.04,
+            "high_gap_claims": ["CS-1", "CS-3"]
+        },
+        "litigation_followup": {
+            "internal_signals": "判决后某劳动者就社会保险损失另案起诉1件",
+            "external_query": "如可获取：另案处理结果"
+        },
+        "data_completeness": "partial",
+        "comment": "中等：变更诉请漏审+结论式驳斥+衍生另案，预期落差未被说理与程序处理吸收（15+5+15+15+15=65）"
+    },
+    {
+        "level": "poor",
+        "score": 20,
+        "quote": "本院认为，关于某劳动者主张的拖欠工资，于法无据，不予支持；关于经济补偿金，缺乏事实依据，不予支持；关于未签订书面劳动合同的二倍工资差额，无法律根据，不予支持。判决如下：驳回某劳动者的诉讼请求。案件受理费由某劳动者负担。某劳动者在庭审中请求确认其与某用人单位于特定期间存在劳动关系的确认之诉，判决书全文只字未提。判决主文未写明任何履行内容、期限与方式，亦未载明不服本判决的救济途径。此后，某劳动者就同一纠纷先后多次起诉。",
+        "reasoning": "多项诉请遭遇遗漏与结论式驳斥的叠加：两项给付请求仅以'于法无据/缺乏事实依据'一笔带过，无任何算式、证据评价或类案对照；确认之诉完全未提及，属零回应；主文不写明履行内容与救济途径，不可执行且无预期管理；当事人预期与裁判结果完全背离，引发连环衍生诉讼。",
+        "sub_scores": {
+            "诉请台账完整性": {"score": 15, "max": 15, "items": ["诉请均可对齐登记，无缺行（缺陷集中在回应与说理层）"]},
+            "逐项回应性": {"score": 0, "max": 25, "items": ["CS-B02: -15×2（确认之诉与一项给付请求零回应，扣分超出子项分值，本子项记0分）"]},
+            "支持度透明核算": {"score": 5, "max": 15, "items": ["CS-B04: -10（金额类诉请仅结论无算式）"]},
+            "裁量合理性": {"score": 0, "max": 30, "items": ["CS-B05: -15×2（两项核心请求结论式驳斥）", "CS-B07: -10（对方明确抗辩未回应）", "CS-B06: -8（酌定事项未披露考量因素）", "CS-B08: -10（口径偏离类案且无特别论证）", "扣分超出子项分值，本子项记0分"]},
+            "预期管理与息讼效果": {"score": 0, "max": 15, "items": ["CS-B09: -10（大额核心诉请驳回未强化说理）", "CS-B10: -5（主文不明确/不可执行）", "本子项记0分"]}
+        },
+        "claim_ledger": [
+            {"claim_id": "CS-1", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付拖欠工资", "claimed_amount": 60000, "awarded_amount": 0, "support_ratio": 0.0, "disposition": "驳回", "reasoning_quality": "结论式驳斥"},
+            {"claim_id": "CS-2", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付经济补偿金", "claimed_amount": 24000, "awarded_amount": 0, "support_ratio": 0.0, "disposition": "驳回", "reasoning_quality": "结论式驳斥"},
+            {"claim_id": "CS-3", "type": "确认之诉", "subject": "某劳动者请求确认劳动关系存续期间", "claimed_amount": null, "awarded_amount": null, "support_ratio": null, "disposition": "未回应", "reasoning_quality": "零回应"},
+            {"claim_id": "CS-4", "type": "给付之诉", "subject": "某劳动者请求某用人单位支付未签订书面劳动合同二倍工资差额", "claimed_amount": 66000, "awarded_amount": null, "support_ratio": null, "disposition": "未回应", "reasoning_quality": "零回应"}
+        ],
+        "discretion_points": [
+            {"issue": "全部请求的整体处理", "legal_basis_cited": "未引用具体条文", "factors_disclosed": "未披露", "adversarial_response": "未回应对方明确抗辩", "grade": "不充分"}
+        ],
+        "expectation_gap": {
+            "performance_claims_total": 150000,
+            "awarded_total": 0,
+            "overall_ratio": 0.0,
+            "high_gap_claims": ["CS-1", "CS-2", "CS-4"]
+        },
+        "litigation_followup": {
+            "internal_signals": "文书内无释明与指引；当事人就同一纠纷先后多次起诉（连环衍生诉讼信号）",
+            "external_query": "如可获取：同一当事人连环涉诉统计"
+        },
+        "data_completeness": "partial",
+        "comment": "严重缺陷：多项零回应+通篇结论式驳斥+主文不可执行+连环衍生诉讼，当事人预期完全落空（15+0+5+0+0=20）"
+    }
+]

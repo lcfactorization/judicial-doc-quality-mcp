@@ -1,4 +1,4 @@
-"""Prompt builder v0.2.0 — trial stage inference + system prompt construction.
+"""Prompt builder v0.4.0 — trial stage inference + system prompt construction.
 
 Consolidates `_infer_trial_stage` (from server.py) and `build_system_prompt`
 (from skill_runner.py) into a single cohesive module.
@@ -41,7 +41,7 @@ def infer_trial_stage(case_name: str, document_text: str = "") -> str:
     scanning for party terminology.
 
     Args:
-        case_name: Case number string (e.g. "(2024)苏06民终6271号").
+        case_name: Case number string (e.g. "(20XX)X民终XXXX号").
         document_text: Full document text for fallback inference.
 
     Returns:
@@ -234,6 +234,26 @@ def build_system_prompt(meta, trial_stage: str = "") -> str:
         parts.append("- 文理：文书结构和语言表达")
         parts.append("")
 
+    if meta.name == "claim_support":
+        parts.append("## 诉请支持度分析框架（五步法）")
+        parts.append("本维度采用'台账—对齐—算账—裁量—预期'五步分析框架：")
+        parts.append("- 第一步 台账：从起诉状/上诉状中逐项提取诉讼请求，建立claim_ledger台账（claim_id/type/subject/claimed_amount/awarded_amount/support_ratio/disposition/reasoning_quality）")
+        parts.append("- 第二步 逐项对齐：将每项诉请与'本院认为'说理及判决主文逐项对齐，标记支持/部分支持/驳回/未回应/另案，零回应（CS-B02）和变更/增加诉请未审理（CS-B03）重点排查")
+        parts.append("- 第三步 金额核算：对给付类诉请核算'基数×期间/比例±调整项=判付金额'的算式链条，仅结论无算式的按CS-B04扣分")
+        parts.append("- 第四步 裁量四要素：对每个裁量点按issue/legal_basis_cited/factors_disclosed/adversarial_response/grade四要素审查，登记入discretion_points；结论式驳斥（CS-B05）、未披露考量因素（CS-B06）、未回应抗辩（CS-B07）、口径偏离类案（CS-B08）逐项扣分")
+        parts.append("- 第五步 衍生信号：核算expectation_gap（overall_ratio=awarded_total/performance_claims_total），识别文书内衍生诉讼信号（另案处理、告知另诉等）登记入litigation_followup")
+        parts.append("- 交叉校验联动：评分完成后，将expectation_gap.overall_ratio作为claim_support_overall_ratio、命中CS-B02/CS-B03时将编号作为claim_support_hit_codes、审级作为trial_stage传入cross_check_consistency，触发R11/R12规则")
+        parts.append("")
+
+    # ── Red-flag nomination discipline ───────────────────────────
+    parts.append("## 红旗提名纪律（Red-Flag Nomination Discipline）")
+    parts.append("加权综合分会稀释致命信号（如遗漏诉请该发回重审的判决可能拿B+）。你可在输出JSON的可选字段 red_flag_candidates 中提名红旗候选：")
+    parts.append("- 仅当发现可能导致改判/发回重审/撤销/变更裁判结果的强信号时才提名，宁缺毋滥")
+    parts.append("- 每项提名必须包含：item（红旗事项）、quote（原文引用）、reason（提名理由）、suggested_level（建议级别：veto=一票否决级/warning=预警级）")
+    parts.append("- 提名不直接改变评分：最终是否触发红旗封顶由规则层（RED_FLAG_RULES/ADMIN_RED_FLAG_RULES）确定性裁决")
+    parts.append("- 禁止将一般性瑕疵提名为红旗：一般瑕疵一律走正常 deduction_items 扣分通道")
+    parts.append("")
+
     # ── Negative list ───────────────────────────────────────────
     parts.append("## 负面清单（一票否决项）")
     parts.append("以下情形一旦确认，该维度评分直接降为0分：")
@@ -363,6 +383,20 @@ def render_dimension_prompt(
                     },
                 },
             },
+            "red_flag_candidates": {
+                "type": "array",
+                "description": "红旗提名（可选）：仅当发现可能导致改判/发回重审/撤销/变更裁判结果的强信号时提名，宁缺毋滥；最终是否封顶由规则层确定性裁决",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "item": {"type": "string", "description": "红旗事项"},
+                        "quote": {"type": "string", "description": "原文引用"},
+                        "reason": {"type": "string", "description": "提名理由"},
+                        "suggested_level": {"type": "string", "enum": ["veto", "warning"], "description": "建议级别：veto=一票否决级/warning=预警级"},
+                    },
+                    "required": ["item", "quote", "reason", "suggested_level"],
+                },
+            },
         },
         "required": ["quote", "reasoning", "score"],
     }
@@ -376,6 +410,68 @@ def render_dimension_prompt(
         output_schema["properties"]["sub_scores"] = {
             "type": "object",
             "description": "五个子项得分",
+        }
+
+    if dimension == "claim_support":
+        output_schema["properties"]["data_completeness"] = {
+            "type": "string",
+            "enum": ["complete", "partial", "insufficient"],
+            "description": "数据完整性",
+        }
+        output_schema["properties"]["sub_scores"] = {
+            "type": "object",
+            "description": "五个子项得分（诉请台账完整性/逐项回应性/支持度透明核算/裁量合理性/预期管理与息讼效果）",
+        }
+        output_schema["properties"]["claim_ledger"] = {
+            "type": "array",
+            "description": "诉请台账：当事人全部诉讼请求逐项登记与支持度核算",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "claim_id": {"type": "string", "description": "诉请编号（CS-1, CS-2, ...）"},
+                    "type": {"type": "string", "enum": ["给付之诉", "确认之诉", "形成之诉"], "description": "诉请类型"},
+                    "subject": {"type": "string", "description": "诉请事项概括"},
+                    "claimed_amount": {"type": ["number", "null"], "description": "请求金额（元），非金额类为null"},
+                    "awarded_amount": {"type": ["number", "null"], "description": "判付金额（元），未回应为null"},
+                    "support_ratio": {"type": ["number", "null"], "description": "支持比例0-1，未回应为null"},
+                    "disposition": {"type": "string", "enum": ["支持", "部分支持", "驳回", "未回应", "另案"], "description": "裁判处理方式"},
+                    "reasoning_quality": {"type": "string", "description": "该项回应的说理质量简评"},
+                },
+                "required": ["claim_id", "type", "subject", "disposition"],
+            },
+        }
+        output_schema["properties"]["discretion_points"] = {
+            "type": "array",
+            "description": "裁量点评级：每个裁量点的四要素审查",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "issue": {"type": "string", "description": "裁量事项"},
+                    "legal_basis_cited": {"type": "string", "description": "引用的法律依据"},
+                    "factors_disclosed": {"type": "string", "description": "披露的考量因素"},
+                    "adversarial_response": {"type": "string", "description": "对对方抗辩的回应情况"},
+                    "grade": {"type": "string", "enum": ["充分", "部分充分", "不充分"], "description": "裁量说理综合评级"},
+                },
+                "required": ["issue", "grade"],
+            },
+        }
+        output_schema["properties"]["expectation_gap"] = {
+            "type": "object",
+            "description": "当事人预期与判决支持度落差核算",
+            "properties": {
+                "performance_claims_total": {"type": "number", "description": "金额类诉请总额（元）"},
+                "awarded_total": {"type": "number", "description": "判付总额（元）"},
+                "overall_ratio": {"type": "number", "description": "总体支持率=awarded_total/performance_claims_total（0-1）"},
+                "high_gap_claims": {"type": "array", "items": {"type": "string"}, "description": "支持率极低的大额/核心诉请claim_id列表"},
+            },
+        }
+        output_schema["properties"]["litigation_followup"] = {
+            "type": "object",
+            "description": "衍生诉讼信号（内部分级数据）",
+            "properties": {
+                "internal_signals": {"type": "string", "description": "文书内可推断的衍生诉讼信号（另案处理、告知另诉等）"},
+                "external_query": {"type": "string", "description": "外部数据查询结果（后续上诉/申诉/衍生诉讼），无则留空"},
+            },
         }
 
     if dimension == "thorough_reasoning":
